@@ -1,0 +1,32 @@
+{
+  "kind": "youtube#searchListResponse",
+  "items": [
+    {
+      "id": { "kind": "youtube#video", "videoId": "abc123" },
+      "snippet": {
+        "publishedAt": "2026-11-10T12:00:00Z",
+        "title": "React &amp; Next.js: what&#39;s new",
+        "description": "A tour of &quot;new&quot; features.",
+        "channelTitle": "Code &amp; Coffee",
+        "thumbnails": {
+          "default": { "url": "https://i.ytimg.com/vi/abc123/default.jpg" },
+          "high": { "url": "https://i.ytimg.com/vi/abc123/hqdefault.jpg" }
+        }
+      }
+    },
+    {
+      "id": { "kind": "youtube#video", "videoId": "def456" },
+      "snippet": {
+        "publishedAt": "2026-11-09T08:30:00Z",
+        "title": "Plain title",
+        "description": "",
+        "channelTitle": "Chan",
+        "thumbnails": {}
+      }
+    },
+    {
+      "id": { "kind": "youtube#channel", "channelId": "UC1" },
+      "snippet": { "publishedAt": "2026-11-09T08:30:00Z", "title": "Not a video" }
+    }
+  ]
+}
