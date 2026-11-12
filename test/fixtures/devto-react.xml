@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>DEV Community: react</title>
+    <link>https://dev.to/t/react</link>
+    <description>The latest articles tagged 'react' on DEV Community.</description>
+    <item>
+      <title>Older &amp; wiser hooks</title>
+      <description>&lt;p&gt;Hooks &amp;amp; state, explained.&lt;/p&gt;</description>
+      <pubDate>Mon, 02 Nov 2026 10:00:00 +0000</pubDate>
+      <link>https://dev.to/alice/older-hooks-1</link>
+      <dc:creator>Alice</dc:creator>
+    </item>
+    <item>
+      <title>Newest React tips</title>
+      <description>&lt;p&gt;&lt;img src="https://media.dev.to/cover.png" alt="cover"&gt;Ten tips for React.&lt;/p&gt;</description>
+      <pubDate>Wed, 11 Nov 2026 09:30:00 +0000</pubDate>
+      <link>https://dev.to/bob/newest-react-tips-2</link>
+      <dc:creator>Bob</dc:creator>
+    </item>
+    <item>
+      <title>Middle post</title>
+      <description>&lt;p&gt;Something in the middle.&lt;/p&gt;</description>
+      <pubDate>Fri, 06 Nov 2026 12:00:00 +0000</pubDate>
+      <link>https://dev.to/carol/middle-3</link>
+      <dc:creator>Carol</dc:creator>
+    </item>
+  </channel>
+</rss>
