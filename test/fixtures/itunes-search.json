@@ -1,0 +1,33 @@
+{
+  "resultCount": 3,
+  "results": [
+    {
+      "wrapperType": "podcastEpisode",
+      "kind": "podcast-episode",
+      "trackName": "Understanding React Hooks",
+      "trackViewUrl": "https://podcasts.apple.com/us/podcast/understanding-react-hooks/id111?i=1000",
+      "collectionName": "The Frontend Show",
+      "description": "<p>We dig into hooks &amp; effects.</p>",
+      "artworkUrl600": "https://example.com/art600.jpg",
+      "releaseDate": "2026-11-10T08:00:00Z",
+      "trackTimeMillis": 1800000,
+      "episodeContentType": "audio",
+      "episodeFileExtension": "mp3"
+    },
+    {
+      "wrapperType": "podcastEpisode",
+      "trackName": "Video episode",
+      "trackViewUrl": "https://podcasts.apple.com/us/podcast/video-episode/id222?i=2000",
+      "collectionName": "Screencasts",
+      "description": "Short one.",
+      "releaseDate": "2026-11-09T08:00:00Z",
+      "episodeContentType": "video",
+      "episodeFileExtension": "mp4"
+    },
+    {
+      "wrapperType": "podcastEpisode",
+      "trackName": "No url",
+      "releaseDate": "2026-11-08T08:00:00Z"
+    }
+  ]
+}
