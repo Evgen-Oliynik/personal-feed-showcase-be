@@ -20,6 +20,14 @@ import { SOURCES } from '../sources/sources.module.js';
 export const PER_SOURCE_LIMIT = 15;
 export const PER_TYPE_CAP = 10;
 
+/** Lowercased, punctuation and emoji removed, whitespace collapsed. */
+export const normalizeTitle = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 export type MediaItemRow = typeof mediaItems.$inferSelect;
 
 export interface Feed {
@@ -67,10 +75,23 @@ export class FeedBuilder {
 
       const fetchedAt = new Date().toISOString();
       const seen = new Set<string>();
+      // Titles already shown on earlier days.
+      const seenTitles = new Set(
+        tx
+          .select({ title: mediaItems.title })
+          .from(feedEntries)
+          .innerJoin(mediaItems, eq(mediaItems.id, feedEntries.mediaItemId))
+          .all()
+          .map((e) => normalizeTitle(e.title))
+          .filter(Boolean),
+      );
       const rows: MediaItemRow[] = [];
       for (const { topic, item } of fetched) {
         if (seen.has(item.url)) continue; // the first topic wins
+        const title = normalizeTitle(item.title);
+        if (title && seenTitles.has(title)) continue; // cross-posted: first in source order wins
         seen.add(item.url);
+        if (title) seenTitles.add(title);
         tx.insert(mediaItems)
           .values({
             url: item.url,

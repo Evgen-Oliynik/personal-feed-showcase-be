@@ -127,7 +127,10 @@ describe('FeedBuilder', () => {
           ? [raw('devto', t, day(1), 'https://x.test/1')]
           : [
               raw('devto', t, day(1), 'https://x.test/1'),
-              raw('devto', t, day(0), 'https://x.test/2'),
+              {
+                ...raw('devto', t, day(0), 'https://x.test/2'),
+                title: 'second',
+              },
             ],
       ),
     ]);
@@ -189,6 +192,58 @@ describe('FeedBuilder', () => {
     ]);
     const feed = await b.build('2026-01-01');
     expect(feed.items.map((i) => i.topic)).toEqual(['a']);
+  });
+});
+
+describe('FeedBuilder title dedup', () => {
+  let h: DbHandle;
+  beforeEach(() => {
+    h = openDatabase(':memory:');
+    h.db
+      .insert(topics)
+      .values({ name: 'a', createdAt: '2026-01-01T00:00:00.000Z' })
+      .run();
+  });
+  afterEach(() => h.sqlite.close());
+
+  const titled = (
+    src: RawMediaItem['source'],
+    url: string,
+    title: string,
+  ): RawMediaItem => ({ ...raw(src, 'a', day(1), url), title });
+
+  it('keeps a cross-posted article once, from the first source', async () => {
+    const b = new FeedBuilder(h.db, noEmbeddings, [
+      source('devto', () => [
+        titled('devto', 'https://d.test/1', 'The Four Things!'),
+      ]),
+      source('medium', () => [
+        titled('medium', 'https://m.test/1', 'the four  things 🚀'),
+      ]),
+    ]);
+    const feed = await b.build('2026-01-01');
+    expect(feed.items.map((i) => i.source)).toEqual(['devto']);
+  });
+
+  it('excludes a title repeated from an earlier day', async () => {
+    let day2 = false;
+    const b = new FeedBuilder(h.db, noEmbeddings, [
+      source('devto', () => [
+        titled('devto', 'https://d.test/1', 'Same Title'),
+      ]),
+      source('medium', () =>
+        day2
+          ? [
+              titled('medium', 'https://m.test/1', 'same title'),
+              titled('medium', 'https://m.test/2', 'Other'),
+            ]
+          : [],
+      ),
+    ]);
+    await b.build('2026-01-01');
+    day2 = true;
+    const d2 = await b.build('2026-01-02');
+    expect(d2.items.map((i) => i.url)).toEqual(['https://m.test/2']);
   });
 });
 
