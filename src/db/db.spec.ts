@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase, type DbHandle } from './database.js';
 import { feedEntries, feeds, mediaItems, topics } from './schema.js';
 
-const vec = (x: number) => new Float32Array(1024).fill(x);
+const vec = (hot: number) =>
+  new Float32Array(384).fill(0).map((_, i) => (i === hot ? 1 : 0));
 
 describe('database', () => {
   let h: DbHandle;
@@ -51,13 +52,13 @@ describe('database', () => {
     const ins = h.sqlite.prepare(
       'INSERT INTO item_embeddings(media_item_id, embedding) VALUES (?, ?)',
     );
-    ins.run(1n, vec(0.1));
-    ins.run(2n, vec(0.9));
+    ins.run(1n, vec(0));
+    ins.run(2n, vec(1));
     const rows = h.sqlite
       .prepare(
         'SELECT media_item_id, distance FROM item_embeddings WHERE embedding MATCH ? AND k = 1',
       )
-      .all(vec(0.88)) as { media_item_id: number }[];
+      .all(vec(1)) as { media_item_id: number }[];
     expect(rows.map((r) => r.media_item_id)).toEqual([2]);
   });
 });

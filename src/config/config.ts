@@ -14,7 +14,7 @@ export const configSchema = z.object({
   FAKE_EXTERNALS: flag,
   FEED_CRON: z.string().min(1).default('0 6 * * *'),
   ANTHROPIC_API_KEY: optionalString,
-  VOYAGE_API_KEY: optionalString,
+  EMBEDDING_MODEL: z.string().min(1).default('Xenova/all-MiniLM-L6-v2'),
   YOUTUBE_API_KEY: optionalString,
 });
 

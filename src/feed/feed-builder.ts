@@ -1,5 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
+import {
+  ITEM_EMBEDDINGS,
+  type ItemEmbeddingStore,
+} from '../ai/item-embeddings.js';
 import type { AppDb } from '../db/database.js';
 import { DB } from '../db/db.module.js';
 import {
@@ -31,6 +35,7 @@ export class FeedBuilder {
 
   constructor(
     @Inject(DB) private readonly db: AppDb,
+    @Inject(ITEM_EMBEDDINGS) private readonly embeddings: ItemEmbeddingStore,
     @Inject(SOURCES) private readonly sources: MediaSource[],
   ) {}
 
@@ -124,7 +129,9 @@ export class FeedBuilder {
       .from(feeds)
       .where(eq(feeds.feedDate, date))
       .get()!;
-    return this.load(date, row.builtAt);
+    const feed = this.load(date, row.builtAt);
+    await this.embeddings.embedMissing(feed.items); // never throws
+    return feed;
   }
 
   /** Round-robin across topics, newest first within a topic, up to the cap. */

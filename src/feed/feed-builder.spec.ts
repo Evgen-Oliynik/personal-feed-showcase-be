@@ -1,8 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ItemEmbeddings } from '../ai/item-embeddings.js';
+import { vi, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase, type DbHandle } from '../db/database.js';
 import { feedEntries, feeds, topics } from '../db/schema.js';
 import type { MediaSource, RawMediaItem } from '../sources/media-source.js';
 import { FeedBuilder } from './feed-builder.js';
+
+const noEmbeddings = { embedMissing: async () => {} };
 
 let n = 0;
 const raw = (
@@ -57,7 +60,7 @@ describe('FeedBuilder', () => {
       source(id, (t) =>
         Array.from({ length: 15 }, (_, i) => raw(id, t, day(i))),
       );
-    const b = new FeedBuilder(h.db, [
+    const b = new FeedBuilder(h.db, noEmbeddings, [
       many('devto'),
       many('youtube'),
       many('itunes'),
@@ -69,7 +72,7 @@ describe('FeedBuilder', () => {
   it('round-robins across topics, newest first', async () => {
     addTopics('a', 'b', 'c');
     const counts: Record<string, number> = { a: 4, b: 2, c: 1 };
-    const b = new FeedBuilder(h.db, [
+    const b = new FeedBuilder(h.db, noEmbeddings, [
       source('devto', (t) =>
         Array.from({ length: counts[t]! }, (_, i) => raw('devto', t, day(i))),
       ),
@@ -92,7 +95,7 @@ describe('FeedBuilder', () => {
 
   it('interleaves read/watch/listen by position within type', async () => {
     addTopics('a');
-    const b = new FeedBuilder(h.db, [
+    const b = new FeedBuilder(h.db, noEmbeddings, [
       source('devto', (t) => [
         raw('devto', t, day(2)),
         raw('devto', t, day(1)),
@@ -118,7 +121,7 @@ describe('FeedBuilder', () => {
   it('excludes items from earlier days', async () => {
     addTopics('a');
     let batch = 0;
-    const b = new FeedBuilder(h.db, [
+    const b = new FeedBuilder(h.db, noEmbeddings, [
       source('devto', (t) =>
         batch === 0
           ? [raw('devto', t, day(1), 'https://x.test/1')]
@@ -138,7 +141,7 @@ describe('FeedBuilder', () => {
   it('is idempotent', async () => {
     addTopics('a');
     let calls = 0;
-    const b = new FeedBuilder(h.db, [
+    const b = new FeedBuilder(h.db, noEmbeddings, [
       source('devto', (t) => {
         calls++;
         return [raw('devto', t, day(calls))];
@@ -152,12 +155,12 @@ describe('FeedBuilder', () => {
   });
 
   it('returns an empty feed and writes no row with zero topics', async () => {
-    const b = new FeedBuilder(h.db, [source('devto', () => [])]);
+    const b = new FeedBuilder(h.db, noEmbeddings, [source('devto', () => [])]);
     const feed = await b.build('2026-01-01');
     expect(feed.items).toEqual([]);
     expect(h.db.select().from(feeds).all()).toHaveLength(0);
     addTopics('a');
-    const later = new FeedBuilder(h.db, [
+    const later = new FeedBuilder(h.db, noEmbeddings, [
       source('devto', (t) => [raw('devto', t, day(1))]),
     ]);
     expect((await later.build('2026-01-01')).items).toHaveLength(1);
@@ -170,7 +173,7 @@ describe('FeedBuilder', () => {
       enabled: () => true,
       fetch: () => Promise.reject(new Error('boom')),
     };
-    const b = new FeedBuilder(h.db, [
+    const b = new FeedBuilder(h.db, noEmbeddings, [
       bad,
       source('devto', (t) => [raw('devto', t, day(1))]),
     ]);
@@ -181,10 +184,59 @@ describe('FeedBuilder', () => {
 
   it('keeps the first topic for a duplicate url', async () => {
     addTopics('a', 'b');
-    const b = new FeedBuilder(h.db, [
+    const b = new FeedBuilder(h.db, noEmbeddings, [
       source('devto', (t) => [raw('devto', t, day(1), 'https://x.test/same')]),
     ]);
     const feed = await b.build('2026-01-01');
     expect(feed.items.map((i) => i.topic)).toEqual(['a']);
   });
 });
+
+describe('FeedBuilder embedding', () => {
+  let h: DbHandle;
+  beforeEach(() => {
+    h = openDatabase(':memory:');
+    h.db.insert(topics).values({ name: 'a' }).run();
+  });
+  afterEach(() => h.sqlite.close());
+
+  const devto = (count: number) =>
+    source('devto', (t) =>
+      Array.from({ length: count }, (_, i) => raw('devto', t, day(i))),
+    );
+
+  it('hands the built feed items to the embedding step, and a failure keeps the feed', async () => {
+    const embedMissing = vi.fn(async (items: unknown[]) => {
+      void items;
+    });
+    const b = new FeedBuilder(h.db, { embedMissing }, [devto(3)]);
+    const feed = await b.build('2026-01-01');
+    expect(embedMissing).toHaveBeenCalledTimes(1);
+    expect(embedMissing.mock.calls[0]![0]).toHaveLength(3);
+    expect(feed.items).toHaveLength(3);
+
+    await b.build('2026-01-01'); // stored feed: nothing new to embed
+    expect(embedMissing).toHaveBeenCalledTimes(1);
+  });
+
+  it('embeds only items without an embedding, and survives embedder failure', async () => {
+    const embed = vi.fn(async (texts: string[]) => texts.map(() => fakeVec()));
+    const store = new ItemEmbeddings(h, { embed });
+    const b = new FeedBuilder(h.db, store, [devto(2)]);
+    const feed = await b.build('2026-01-01');
+    expect(embed.mock.calls[0]![0]).toHaveLength(2);
+
+    await store.embedMissing(feed.items);
+    expect(embed).toHaveBeenCalledTimes(1); // all already embedded
+
+    const failing = new ItemEmbeddings(h, {
+      embed: async () => {
+        throw new Error('boom');
+      },
+    });
+    h.sqlite.exec('DELETE FROM item_embeddings');
+    await expect(failing.embedMissing(feed.items)).resolves.toBeUndefined();
+  });
+});
+
+const fakeVec = () => Array.from({ length: 384 }, (_, i) => (i === 0 ? 1 : 0));

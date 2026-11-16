@@ -8,6 +8,7 @@ describe('validateConfig', () => {
       DATABASE_PATH: './data/feed.db',
       FAKE_EXTERNALS: false,
       FEED_CRON: '0 6 * * *',
+      EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
     });
   });
 
@@ -16,12 +17,11 @@ describe('validateConfig', () => {
       PORT: '5000',
       FAKE_EXTERNALS: '1',
       YOUTUBE_API_KEY: 'k',
-      VOYAGE_API_KEY: '',
     });
     expect(c.PORT).toBe(5000);
     expect(c.FAKE_EXTERNALS).toBe(true);
     expect(c.YOUTUBE_API_KEY).toBe('k');
-    expect(c.VOYAGE_API_KEY).toBeUndefined();
+    expect(c.EMBEDDING_MODEL).toBe('Xenova/all-MiniLM-L6-v2');
   });
 
   it('rejects invalid values', () => {
