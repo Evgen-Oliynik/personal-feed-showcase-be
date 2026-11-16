@@ -32,6 +32,7 @@ export interface Feed {
 @Injectable()
 export class FeedBuilder {
   private readonly logger = new Logger(FeedBuilder.name);
+  private retrying = false;
 
   constructor(
     @Inject(DB) private readonly db: AppDb,
@@ -45,7 +46,11 @@ export class FeedBuilder {
       .from(feeds)
       .where(eq(feeds.feedDate, date))
       .get();
-    if (stored) return this.load(date, stored.builtAt);
+    if (stored) {
+      const feed = this.load(date, stored.builtAt);
+      this.retryMissingEmbeddings(feed.items);
+      return feed;
+    }
 
     const topicRows = this.db
       .select()
@@ -132,6 +137,22 @@ export class FeedBuilder {
     const feed = this.load(date, row.builtAt);
     await this.embeddings.embedMissing(feed.items); // never throws
     return feed;
+  }
+
+  /** Fire-and-forget, one run at a time: a stored feed may hold items whose embedding failed earlier. */
+  private retryMissingEmbeddings(items: MediaItemRow[]) {
+    if (this.retrying) return;
+    this.retrying = true;
+    void Promise.resolve()
+      .then(() => this.embeddings.embedMissing(items))
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `background embedding failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      )
+      .finally(() => {
+        this.retrying = false;
+      });
   }
 
   /** Round-robin across topics, newest first within a topic, up to the cap. */

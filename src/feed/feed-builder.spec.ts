@@ -214,9 +214,40 @@ describe('FeedBuilder embedding', () => {
     expect(embedMissing).toHaveBeenCalledTimes(1);
     expect(embedMissing.mock.calls[0]![0]).toHaveLength(3);
     expect(feed.items).toHaveLength(3);
+  });
 
-    await b.build('2026-01-01'); // stored feed: nothing new to embed
+  it('retries embedMissing in the background for a stored feed, one run at a time', async () => {
+    const embedMissing = vi.fn(async (items: unknown[]) => {
+      void items;
+    });
+    const b = new FeedBuilder(h.db, { embedMissing }, [devto(3)]);
+    await b.build('2026-01-01'); // fresh build awaits its own embedding
     expect(embedMissing).toHaveBeenCalledTimes(1);
+
+    // Second build: does not wait for the (still pending) run.
+    let release2!: () => void;
+    const gate2 = new Promise<void>((r) => (release2 = r));
+    embedMissing.mockImplementation(async () => gate2);
+    const stored = await b.build('2026-01-01');
+    await vi.waitFor(() => expect(embedMissing).toHaveBeenCalledTimes(2));
+    expect(embedMissing.mock.calls[1]![0]).toEqual(stored.items);
+
+    // Overlapping calls start only one run.
+    await b.build('2026-01-01');
+    await b.build('2026-01-01');
+    expect(embedMissing).toHaveBeenCalledTimes(2);
+    release2();
+  });
+
+  it('logs a background rejection instead of surfacing it', async () => {
+    const embedMissing = vi.fn(async (items: unknown[]) => {
+      void items;
+    });
+    const b = new FeedBuilder(h.db, { embedMissing }, [devto(1)]);
+    await b.build('2026-01-01');
+    embedMissing.mockRejectedValueOnce(new Error('boom'));
+    await expect(b.build('2026-01-01')).resolves.toBeDefined();
+    await vi.waitFor(() => expect(embedMissing).toHaveBeenCalledTimes(2));
   });
 
   it('embeds only items without an embedding, and survives embedder failure', async () => {
