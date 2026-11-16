@@ -84,9 +84,10 @@ export class YoutubeSource implements MediaSource {
     if (items.length === 0) return;
     try {
       const ids = items.map((i) => new URL(i.url).searchParams.get('v') ?? '');
+      const requested = ids.slice(0, VIDEOS_BATCH);
       const params = new URLSearchParams({
         part: 'snippet,contentDetails',
-        id: ids.slice(0, VIDEOS_BATCH).join(','),
+        id: requested.join(','),
         key,
       });
       const res = await fetch(`${VIDEOS_URL}?${params}`, {
@@ -95,6 +96,12 @@ export class YoutubeSource implements MediaSource {
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as { items?: VideoItem[] };
       const byId = new Map((body.items ?? []).map((v) => [v.id, v]));
+      const missing = requested.filter((id) => !byId.has(id)).length;
+      if (missing > 0) {
+        this.logger.warn(
+          `youtube videos.list omitted ${missing} of ${requested.length} videos`,
+        );
+      }
       items.forEach((item, i) => {
         const video = byId.get(ids[i]);
         if (!video) return;

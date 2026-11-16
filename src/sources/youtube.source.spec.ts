@@ -105,6 +105,9 @@ describe('YoutubeSource', () => {
   });
 
   it('fills content and duration from one batched videos.list call', async () => {
+    const warn = vi
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => {});
     const f = stubBoth(async () => new Response(videos, { status: 200 }));
     const items = await source('KEY').fetch('react', 10);
     expect(f).toHaveBeenCalledTimes(2);
@@ -122,6 +125,25 @@ describe('YoutubeSource', () => {
     // def456 is omitted by videos.list: snippet fallback, no duration.
     expect(items[1]?.content).toBe('');
     expect(items[1]?.durationSec).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'youtube videos.list omitted 1 of 2 videos',
+    );
+  });
+
+  it('does not warn when videos.list returns every requested id', async () => {
+    const warn = vi
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => {});
+    const all = JSON.stringify({
+      items: [
+        { id: 'abc123', snippet: { description: 'a' } },
+        { id: 'def456', snippet: { description: 'b' } },
+      ],
+    });
+    stubBoth(async () => new Response(all, { status: 200 }));
+    await source('KEY').fetch('react', 10);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('falls back to search data and warns once when videos.list fails', async () => {
