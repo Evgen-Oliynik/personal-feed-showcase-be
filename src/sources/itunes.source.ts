@@ -3,6 +3,9 @@ import type { MediaSource, RawMediaItem } from './media-source.js';
 import { normalizeContent, normalizeSummary } from './classify.js';
 
 const TIMEOUT_MS = 10_000;
+const WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+const SEARCH_LIMIT = 50;
+const TECHNOLOGY_GENRE_ID = '1318';
 const SEARCH_URL = 'https://itunes.apple.com/search';
 
 interface ItunesResult {
@@ -12,6 +15,7 @@ interface ItunesResult {
   collectionName?: string;
   artworkUrl600?: string;
   releaseDate?: string;
+  genres?: { id?: string; name?: string }[];
   trackTimeMillis?: number;
   episodeContentType?: string;
   episodeFileExtension?: string;
@@ -44,16 +48,23 @@ export class ItunesSource implements MediaSource {
         media: 'podcast',
         entity: 'podcastEpisode',
         term: topic,
-        limit: String(limit),
+        limit: String(SEARCH_LIMIT),
       });
       const res = await fetch(`${SEARCH_URL}?${params}`, {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as { results?: ItunesResult[] };
+      const cutoff = Date.now() - WINDOW_MS;
       return (body.results ?? [])
+        .filter((r) => r.genres?.some((g) => g.id === TECHNOLOGY_GENRE_ID))
         .map((r) => this.toRaw(r))
-        .filter((item): item is RawMediaItem => item !== null);
+        .filter(
+          (item): item is RawMediaItem =>
+            item !== null && Date.parse(item.publishedAt) >= cutoff,
+        )
+        .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+        .slice(0, limit);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.logger.warn(`itunes fetch failed for topic "${topic}": ${reason}`);

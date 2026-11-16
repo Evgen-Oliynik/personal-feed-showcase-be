@@ -15,6 +15,7 @@ function stubFetch(impl: () => Promise<Response>) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -29,11 +30,13 @@ describe('ItunesSource', () => {
       media: 'podcast',
       entity: 'podcastEpisode',
       term: 'react hooks',
-      limit: '5',
+      limit: '50',
     });
   });
 
   it('maps fixture results to RawMediaItem, skipping incomplete ones', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-12T00:00:00Z'));
     stubFetch(async () => new Response(fixture, { status: 200 }));
     const items = await new ItunesSource().fetch('react', 5);
     expect(items).toHaveLength(2);
@@ -51,6 +54,14 @@ describe('ItunesSource', () => {
     });
     expect(items[1]?.enclosureMimeType).toBe('video/mp4');
     expect(items[1]?.durationSec).toBeUndefined();
+  });
+
+  it('caps the result at limit, newest first', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-12T00:00:00Z'));
+    stubFetch(async () => new Response(fixture, { status: 200 }));
+    const items = await new ItunesSource().fetch('react', 1);
+    expect(items.map((i) => i.title)).toEqual(['Understanding React Hooks']);
   });
 
   it('returns [] and warns on non-200', async () => {

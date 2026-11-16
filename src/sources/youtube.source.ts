@@ -56,7 +56,10 @@ export class YoutubeSource implements MediaSource {
       const params = new URLSearchParams({
         part: 'snippet',
         type: 'video',
-        order: 'date',
+        order: 'relevance',
+        relevanceLanguage: 'en',
+        videoDuration: 'medium',
+        videoCategoryId: '28',
         maxResults: String(limit),
         q: topic,
         publishedAfter: new Date(Date.now() - WINDOW_MS).toISOString(),

@@ -1,5 +1,5 @@
 {
-  "resultCount": 3,
+  "resultCount": 5,
   "results": [
     {
       "wrapperType": "podcastEpisode",
@@ -12,7 +12,13 @@
       "releaseDate": "2026-11-10T08:00:00Z",
       "trackTimeMillis": 1800000,
       "episodeContentType": "audio",
-      "episodeFileExtension": "mp3"
+      "episodeFileExtension": "mp3",
+      "genres": [
+        {
+          "name": "Technology",
+          "id": "1318"
+        }
+      ]
     },
     {
       "wrapperType": "podcastEpisode",
@@ -22,12 +28,52 @@
       "description": "Short one.",
       "releaseDate": "2026-11-09T08:00:00Z",
       "episodeContentType": "video",
-      "episodeFileExtension": "mp4"
+      "episodeFileExtension": "mp4",
+      "genres": [
+        {
+          "name": "Technology",
+          "id": "1318"
+        }
+      ]
     },
     {
       "wrapperType": "podcastEpisode",
       "trackName": "No url",
-      "releaseDate": "2026-11-08T08:00:00Z"
+      "releaseDate": "2026-11-08T08:00:00Z",
+      "genres": [
+        {
+          "name": "Technology",
+          "id": "1318"
+        }
+      ]
+    },
+    {
+      "wrapperType": "podcastEpisode",
+      "trackName": "ReactCAST food talk",
+      "trackViewUrl": "https://podcasts.apple.com/us/podcast/reactcast/id333?i=3000",
+      "collectionName": "ReactCAST",
+      "description": "Movies and food.",
+      "releaseDate": "2026-11-11T08:00:00Z",
+      "genres": [
+        {
+          "name": "Comedy",
+          "id": "1303"
+        }
+      ]
+    },
+    {
+      "wrapperType": "podcastEpisode",
+      "trackName": "Old React episode",
+      "trackViewUrl": "https://podcasts.apple.com/us/podcast/old/id444?i=4000",
+      "collectionName": "Archive",
+      "description": "Ancient.",
+      "releaseDate": "2025-01-01T08:00:00Z",
+      "genres": [
+        {
+          "name": "Technology",
+          "id": "1318"
+        }
+      ]
     }
   ]
 }

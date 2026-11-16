@@ -60,7 +60,10 @@ describe('YoutubeSource', () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({
       part: 'snippet',
       type: 'video',
-      order: 'date',
+      order: 'relevance',
+      relevanceLanguage: 'en',
+      videoDuration: 'medium',
+      videoCategoryId: '28',
       maxResults: '5',
       q: 'react hooks',
       publishedAfter: '2026-11-05T00:00:00.000Z',
