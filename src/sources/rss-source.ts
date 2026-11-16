@@ -5,7 +5,7 @@ import type {
   MediaSourceId,
   RawMediaItem,
 } from './media-source.js';
-import { normalizeSummary } from './classify.js';
+import { normalizeContent, normalizeSummary } from './classify.js';
 
 const TIMEOUT_MS = 10_000;
 const FIRST_IMG_SRC = /<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/i;
@@ -55,10 +55,12 @@ export abstract class RssSource implements MediaSource {
     if (!url || !title || Number.isNaN(date)) return null;
     const html =
       item['content:encoded'] ?? item.content ?? item.contentSnippet ?? '';
+    const text = html || (item.contentSnippet ?? '');
     const raw: RawMediaItem = {
       url,
       title,
-      summary: normalizeSummary(html || (item.contentSnippet ?? '')),
+      summary: normalizeSummary(text),
+      content: normalizeContent(text),
       publishedAt: new Date(date).toISOString(),
       source: this.id,
     };

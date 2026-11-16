@@ -2,11 +2,30 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../config/config.js';
 import type { MediaSource, RawMediaItem } from './media-source.js';
-import { normalizeSummary } from './classify.js';
+import { normalizeContent, normalizeSummary } from './classify.js';
 
 const TIMEOUT_MS = 10_000;
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const SEARCH_URL = 'https://www.googleapis.com/youtube/v3/search';
+const VIDEOS_URL = 'https://www.googleapis.com/youtube/v3/videos';
+const VIDEOS_BATCH = 50;
+const ISO_DURATION = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/;
+
+/** ISO 8601 duration (e.g. PT1H2M3S) to seconds; undefined when unparseable. */
+export function parseIsoDuration(
+  value: string | undefined,
+): number | undefined {
+  const m = ISO_DURATION.exec(value ?? '');
+  if (!m || !value || value === 'P' || value.endsWith('T')) return undefined;
+  const [d, h, min, sec] = m.slice(1).map((x) => Number(x ?? 0));
+  return d! * 86400 + h! * 3600 + min! * 60 + sec!;
+}
+
+interface VideoItem {
+  id?: string;
+  snippet?: { description?: string };
+  contentDetails?: { duration?: string };
+}
 
 interface SearchItem {
   id?: { videoId?: string };
@@ -48,13 +67,45 @@ export class YoutubeSource implements MediaSource {
       });
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as { items?: SearchItem[] };
-      return (body.items ?? [])
+      const items = (body.items ?? [])
         .map((item) => this.toRaw(item))
         .filter((item): item is RawMediaItem => item !== null);
+      await this.enrich(items, key);
+      return items;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.logger.warn(`youtube fetch failed for topic "${topic}": ${reason}`);
       return [];
+    }
+  }
+
+  /** One batched videos.list call; on any failure keep the search data and warn once. */
+  private async enrich(items: RawMediaItem[], key: string): Promise<void> {
+    if (items.length === 0) return;
+    try {
+      const ids = items.map((i) => new URL(i.url).searchParams.get('v') ?? '');
+      const params = new URLSearchParams({
+        part: 'snippet,contentDetails',
+        id: ids.slice(0, VIDEOS_BATCH).join(','),
+        key,
+      });
+      const res = await fetch(`${VIDEOS_URL}?${params}`, {
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { items?: VideoItem[] };
+      const byId = new Map((body.items ?? []).map((v) => [v.id, v]));
+      items.forEach((item, i) => {
+        const video = byId.get(ids[i]);
+        if (!video) return;
+        const description = video.snippet?.description;
+        if (description) item.content = normalizeContent(description);
+        const duration = parseIsoDuration(video.contentDetails?.duration);
+        if (duration !== undefined) item.durationSec = duration;
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`youtube videos.list failed: ${reason}`);
     }
   }
 
@@ -68,6 +119,7 @@ export class YoutubeSource implements MediaSource {
       url: `https://www.youtube.com/watch?v=${videoId}`,
       title,
       summary: normalizeSummary(s?.description ?? ''),
+      content: normalizeContent(s?.description ?? ''),
       publishedAt: new Date(date).toISOString(),
       source: 'youtube',
     };

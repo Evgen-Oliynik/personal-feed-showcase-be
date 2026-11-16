@@ -39,6 +39,7 @@ describe('DevtoSource', () => {
     });
     expect(items[1]?.imageUrl).toBeUndefined();
     expect(items[2]?.summary).toBe('Hooks & state, explained.');
+    expect(items[2]?.content).toBe('Hooks & state, explained.');
   });
 
   it('respects limit', async () => {

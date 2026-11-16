@@ -69,6 +69,7 @@ export class FeedBuilder {
             topic,
             title: item.title,
             summary: item.summary,
+            content: item.content ?? null,
             author: item.author ?? null,
             imageUrl: item.imageUrl ?? null,
             publishedAt: item.publishedAt,

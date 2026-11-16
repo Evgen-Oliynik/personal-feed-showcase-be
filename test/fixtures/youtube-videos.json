@@ -1,0 +1,12 @@
+{
+  "kind": "youtube#videoListResponse",
+  "items": [
+    {
+      "id": "abc123",
+      "snippet": {
+        "description": "A tour of &quot;new&quot; features.\n\nChapters:\n0:00 Intro &amp; goals\n1:00 Server components"
+      },
+      "contentDetails": { "duration": "PT1H2M3S" }
+    }
+  ]
+}

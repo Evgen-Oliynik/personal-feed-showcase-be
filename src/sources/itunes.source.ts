@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { MediaSource, RawMediaItem } from './media-source.js';
-import { normalizeSummary } from './classify.js';
+import { normalizeContent, normalizeSummary } from './classify.js';
 
 const TIMEOUT_MS = 10_000;
 const SEARCH_URL = 'https://itunes.apple.com/search';
@@ -69,6 +69,7 @@ export class ItunesSource implements MediaSource {
       url: r.trackViewUrl,
       title,
       summary: normalizeSummary(r.description ?? ''),
+      content: normalizeContent(r.description ?? ''),
       publishedAt: new Date(date).toISOString(),
       source: 'itunes',
     };

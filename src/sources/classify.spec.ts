@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classify, normalizeSummary } from './classify.js';
+import { classify, normalizeContent, normalizeSummary } from './classify.js';
 import type { RawMediaItem } from './media-source.js';
 
 const item = (over: Partial<RawMediaItem> = {}): RawMediaItem => ({
@@ -22,7 +22,9 @@ describe('classify', () => {
     expect(classify(item({ source: 'youtube' }))).toBe('watch');
   });
   it('youtube.com / youtu.be host → watch', () => {
-    expect(classify(item({ url: 'https://www.youtube.com/watch?v=1' }))).toBe('watch');
+    expect(classify(item({ url: 'https://www.youtube.com/watch?v=1' }))).toBe(
+      'watch',
+    );
     expect(classify(item({ url: 'https://youtu.be/1' }))).toBe('watch');
   });
   it('lookalike host is not youtube', () => {
@@ -33,22 +35,32 @@ describe('classify', () => {
   });
   it('otherwise → read', () => {
     expect(classify(item())).toBe('read');
-    expect(classify(item({ source: 'medium', enclosureMimeType: 'image/png' }))).toBe('read');
+    expect(
+      classify(item({ source: 'medium', enclosureMimeType: 'image/png' })),
+    ).toBe('read');
   });
   it('mime beats source and host', () => {
-    expect(classify(item({ source: 'youtube', enclosureMimeType: 'audio/mp4' }))).toBe('listen');
-    expect(classify(item({ source: 'itunes', enclosureMimeType: 'video/mp4' }))).toBe('watch');
+    expect(
+      classify(item({ source: 'youtube', enclosureMimeType: 'audio/mp4' })),
+    ).toBe('listen');
+    expect(
+      classify(item({ source: 'itunes', enclosureMimeType: 'video/mp4' })),
+    ).toBe('watch');
   });
   it('youtube beats itunes', () => {
-    expect(classify(item({ source: 'itunes', url: 'https://youtu.be/1' }))).toBe('watch');
+    expect(
+      classify(item({ source: 'itunes', url: 'https://youtu.be/1' })),
+    ).toBe('watch');
   });
 });
 
 describe('normalizeSummary', () => {
   it('strips tags and entities and collapses whitespace', () => {
-    expect(normalizeSummary('<p>Hello&nbsp; <b>big</b>\n\n world &amp; &#39;co&#x27;</p>')).toBe(
-      "Hello big world & 'co'",
-    );
+    expect(
+      normalizeSummary(
+        '<p>Hello&nbsp; <b>big</b>\n\n world &amp; &#39;co&#x27;</p>',
+      ),
+    ).toBe("Hello big world & 'co'");
   });
   it('leaves short text untouched', () => {
     expect(normalizeSummary('short')).toBe('short');
@@ -62,5 +74,22 @@ describe('normalizeSummary', () => {
   it('never cuts mid-word', () => {
     const out = normalizeSummary(`${'a'.repeat(295)} bcdefghij klm`);
     expect(out).toBe(`${'a'.repeat(295)}…`);
+  });
+});
+
+describe('normalizeContent', () => {
+  it('strips HTML and entities and collapses whitespace', () => {
+    expect(normalizeContent('<p>Hi&nbsp; <b>there</b>\n\n &amp; you</p>')).toBe(
+      'Hi there & you',
+    );
+  });
+
+  it('truncates at 2000 characters on a word boundary, longer than a summary', () => {
+    const long = 'word '.repeat(600);
+    const out = normalizeContent(long);
+    expect(out.length).toBeGreaterThan(300);
+    expect(out.length).toBeLessThanOrEqual(2001);
+    expect(out.endsWith('word…')).toBe(true);
+    expect(normalizeSummary(long).length).toBeLessThanOrEqual(301);
   });
 });

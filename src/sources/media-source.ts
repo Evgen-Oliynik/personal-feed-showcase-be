@@ -4,6 +4,8 @@ export interface RawMediaItem {
   url: string;
   title: string;
   summary: string;
+  /** Longer description (up to 2000 chars) for embeddings and chat. */
+  content?: string;
   author?: string;
   imageUrl?: string;
   /** ISO 8601 timestamp. */

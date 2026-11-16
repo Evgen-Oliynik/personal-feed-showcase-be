@@ -41,6 +41,7 @@ describe('ItunesSource', () => {
       url: 'https://podcasts.apple.com/us/podcast/understanding-react-hooks/id111?i=1000',
       title: 'Understanding React Hooks',
       summary: expect.stringContaining('hooks & effects'),
+      content: 'We dig into hooks & effects.',
       author: 'The Frontend Show',
       imageUrl: 'https://example.com/art600.jpg',
       publishedAt: '2026-11-10T08:00:00.000Z',

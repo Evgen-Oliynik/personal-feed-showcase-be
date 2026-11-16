@@ -20,6 +20,7 @@ export const mediaItems = sqliteTable('media_items', {
   topic: text('topic').notNull(),
   title: text('title').notNull(),
   summary: text('summary').notNull(),
+  content: text('content'),
   author: text('author'),
   imageUrl: text('image_url'),
   publishedAt: text('published_at').notNull(),
