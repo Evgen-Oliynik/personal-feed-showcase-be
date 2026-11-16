@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../config/config.js';
 import { DevtoSource } from './devto.source.js';
@@ -9,6 +9,11 @@ import { MediumSource } from './medium.source.js';
 import { YoutubeSource } from './youtube.source.js';
 
 export const SOURCES = Symbol('SOURCES');
+
+/** The env key each keyed source needs to be enabled. */
+const REQUIRED_KEY: Partial<Record<MediaSource['id'], string>> = {
+  youtube: 'YOUTUBE_API_KEY',
+};
 
 @Module({
   providers: [
@@ -28,10 +33,18 @@ export const SOURCES = Symbol('SOURCES');
       useFactory: (
         config: ConfigService<AppConfig, true>,
         ...real: MediaSource[]
-      ): MediaSource[] =>
-        config.get('FAKE_EXTERNALS', { infer: true })
-          ? createFixtureSources()
-          : real.filter((s) => s.enabled()),
+      ): MediaSource[] => {
+        if (config.get('FAKE_EXTERNALS', { infer: true })) {
+          return createFixtureSources();
+        }
+        const logger = new Logger(SourcesModule.name);
+        for (const s of real) {
+          if (!s.enabled()) {
+            logger.warn(`${s.id} disabled: ${REQUIRED_KEY[s.id]} is not set`);
+          }
+        }
+        return real.filter((s) => s.enabled());
+      },
     },
   ],
   exports: [SOURCES],

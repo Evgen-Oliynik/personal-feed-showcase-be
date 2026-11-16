@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
-import { describe, expect, it } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { validateConfig } from '../config/config.js';
 import type { MediaSource } from './media-source.js';
 import { SOURCES, SourcesModule } from './sources.module.js';
@@ -21,6 +22,28 @@ async function sourcesFor(env: Record<string, string>): Promise<MediaSource[]> {
 }
 
 describe('SourcesModule', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    // ConfigModule copies validated values into process.env; don't leak the key.
+    delete process.env.YOUTUBE_API_KEY;
+  });
+
+  it('warns once for a disabled youtube source, and not when keyed', async () => {
+    const warn = vi
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => {});
+    await sourcesFor({});
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'youtube disabled: YOUTUBE_API_KEY is not set',
+    );
+
+    warn.mockClear();
+    await sourcesFor({ YOUTUBE_API_KEY: 'k' });
+    await sourcesFor({ FAKE_EXTERNALS: '1' });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('wires the real sources by default (youtube only with a key)', async () => {
     const sources = await sourcesFor({});
     expect(sources.map((s) => s.id)).toEqual(['devto', 'medium', 'itunes']);
