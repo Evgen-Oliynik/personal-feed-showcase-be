@@ -22,6 +22,7 @@ export const configSchema = z.object({
     }),
   ANTHROPIC_API_KEY: optionalString,
   EMBEDDING_MODEL: z.string().min(1).default('Xenova/all-MiniLM-L6-v2'),
+  CHAT_MAX_DISTANCE: z.coerce.number().min(0).max(2).default(0.6),
   YOUTUBE_API_KEY: optionalString,
 });
 

@@ -8,6 +8,7 @@ describe('validateConfig', () => {
       DATABASE_PATH: './data/feed.db',
       FAKE_EXTERNALS: false,
       FEED_CRON: '0 6 * * *',
+      CHAT_MAX_DISTANCE: 0.6,
       EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
     });
   });
