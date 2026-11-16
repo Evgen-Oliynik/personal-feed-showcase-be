@@ -24,6 +24,18 @@ describe('validateConfig', () => {
     expect(c.EMBEDDING_MODEL).toBe('Xenova/all-MiniLM-L6-v2');
   });
 
+  it('accepts a valid FEED_CRON', () => {
+    expect(validateConfig({ FEED_CRON: '*/5 * * * *' }).FEED_CRON).toBe(
+      '*/5 * * * *',
+    );
+  });
+
+  it('rejects a malformed FEED_CRON', () => {
+    expect(() => validateConfig({ FEED_CRON: 'abc' })).toThrow(
+      /FEED_CRON is not a valid cron expression/,
+    );
+  });
+
   it('rejects invalid values', () => {
     expect(() => validateConfig({ PORT: 'abc' })).toThrow();
     expect(() => validateConfig({ FAKE_EXTERNALS: 'maybe' })).toThrow();

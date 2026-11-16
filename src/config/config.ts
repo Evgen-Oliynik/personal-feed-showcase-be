@@ -1,3 +1,4 @@
+import { validateCronExpression } from 'cron';
 import { z } from 'zod';
 
 const flag = z
@@ -12,7 +13,13 @@ export const configSchema = z.object({
   FRONTEND_ORIGIN: z.string().min(1).default('http://localhost:3000'),
   DATABASE_PATH: z.string().min(1).default('./data/feed.db'),
   FAKE_EXTERNALS: flag,
-  FEED_CRON: z.string().min(1).default('0 6 * * *'),
+  FEED_CRON: z
+    .string()
+    .min(1)
+    .default('0 6 * * *')
+    .refine((v) => validateCronExpression(v).valid, {
+      message: 'FEED_CRON is not a valid cron expression',
+    }),
   ANTHROPIC_API_KEY: optionalString,
   EMBEDDING_MODEL: z.string().min(1).default('Xenova/all-MiniLM-L6-v2'),
   YOUTUBE_API_KEY: optionalString,
