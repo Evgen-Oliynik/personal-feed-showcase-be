@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../config/config.js';
 import { openDatabase, type DbHandle } from '../db/database.js';
-import { localDate } from '../feed/feed.service.js';
+import type { FeedComposer } from '../feed/feed-composer.js';
 import { ChatService, NOT_COVERED } from './chat.service.js';
 import { FakeEmbedder } from './embedder.js';
 import type { Llm } from './llm.js';
@@ -18,8 +18,17 @@ describe('ChatService', () => {
   let llm: { stream: ReturnType<typeof vi.fn> };
   let service: ChatService;
   const embedder = new FakeEmbedder();
+  /** topic → items in that topic's feed (what `FeedComposer.compose` returns). */
+  const feeds = new Map<string, number[]>();
+  const compose = vi.fn((topics: string[]) => {
+    const ids = new Set(topics.flatMap((t) => feeds.get(t) ?? []));
+    return Promise.resolve(
+      [...ids].map((id) => rows.get(id)).filter((r) => r !== undefined),
+    );
+  });
+  const rows = new Map<number, object>();
 
-  async function add(id: number, title: string, date: string | null) {
+  async function add(id: number, title: string, topic: string | null) {
     handle.sqlite
       .prepare(
         `INSERT INTO media_items(id,url,type,source,topic,title,summary,published_at,fetched_at,first_seen_date)
@@ -37,13 +46,15 @@ describe('ChatService', () => {
         'f',
         'd',
       );
-    if (date) {
-      handle.sqlite
-        .prepare(
-          "INSERT INTO topic_items(topic,fetch_date,media_item_id) VALUES ('t',?,?)",
-        )
-        .run(date, id);
-    }
+    rows.set(id, {
+      id,
+      url: `https://x.test/${id}`,
+      type: 'read',
+      source: 'devto',
+      title,
+      summary: `About ${title}`,
+    });
+    if (topic) feeds.set(topic, [...(feeds.get(topic) ?? []), id]);
     const [v] = await embedder.embed([`${title}\nAbout ${title}`]);
     handle.sqlite
       .prepare(
@@ -53,6 +64,9 @@ describe('ChatService', () => {
   }
 
   beforeEach(() => {
+    feeds.clear();
+    rows.clear();
+    compose.mockClear();
     handle = openDatabase(':memory:');
     llm = {
       stream: vi.fn(async function* () {
@@ -64,24 +78,25 @@ describe('ChatService', () => {
       AppConfig,
       true
     >;
-    service = new ChatService(handle, embedder, llm as unknown as Llm, config);
+    service = new ChatService(handle, embedder, llm as unknown as Llm, config, {
+      compose,
+    } as unknown as FeedComposer);
   });
 
   afterEach(() => handle.sqlite.close());
 
   it('does not call the LLM when nothing matches', async () => {
-    await add(1, 'rust async runtime', localDate());
-    const res = await service.answer('banana smoothie recipe');
+    await add(1, 'rust async runtime', 'a');
+    const res = await service.answer('banana smoothie recipe', ['a']);
     expect(res.sources).toEqual([]);
     expect(await collect(res.tokens)).toBe(NOT_COVERED);
     expect(llm.stream).not.toHaveBeenCalled();
   });
 
   it('numbers sources in retrieval order and builds the prompt', async () => {
-    const today = localDate();
-    await add(1, 'rust async tokio', today);
-    await add(2, 'rust async', today);
-    const res = await service.answer('rust async');
+    await add(1, 'rust async tokio', 'a');
+    await add(2, 'rust async', 'a');
+    const res = await service.answer('rust async', ['a']);
     expect(res.sources.map((s) => [s.n, s.id])).toEqual([
       [1, 2],
       [2, 1],
@@ -94,11 +109,20 @@ describe('ChatService', () => {
     );
   });
 
-  it('only retrieves items in today’s feed', async () => {
-    await add(1, 'rust async', '2000-01-01');
-    await add(2, 'rust async', null);
-    await add(3, 'rust async', localDate());
-    const res = await service.answer('rust async');
+  it('only retrieves items in the given topics’ feed', async () => {
+    await add(1, 'rust async', null);
+    await add(2, 'rust async', 'b');
+    await add(3, 'rust async', 'a');
+    const res = await service.answer('rust async', ['a']);
+    expect(compose.mock.calls[0]![0]).toEqual(['a']);
     expect(res.sources.map((s) => s.id)).toEqual([3]);
+  });
+
+  it('answers not-in-materials without the LLM when there are no topics', async () => {
+    await add(1, 'rust async', 'a');
+    const res = await service.answer('rust async', []);
+    expect(res.sources).toEqual([]);
+    expect(await collect(res.tokens)).toBe(NOT_COVERED);
+    expect(llm.stream).not.toHaveBeenCalled();
   });
 });

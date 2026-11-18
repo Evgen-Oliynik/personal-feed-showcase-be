@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Logger,
@@ -8,7 +9,11 @@ import {
   UsePipes,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ChatService } from '../ai/chat.service.js';
+import { ChatService, type ChatAnswer } from '../ai/chat.service.js';
+import {
+  InvalidTopicError,
+  TooManyTopicsError,
+} from '../feed/feed-composer.js';
 import { chatSchema, type ChatDto } from './chat.schema.js';
 
 function send(res: Response, event: string, data: unknown): void {
@@ -27,14 +32,20 @@ export class ChatController {
     @Body({ schema: chatSchema }) body: ChatDto,
     @Res() res: Response,
   ): Promise<void> {
-    res.status(200).set({
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    res.flushHeaders();
+    let answer: ChatAnswer;
     try {
-      const answer = await this.chat.answer(body.question);
+      answer = await this.chat.answer(body.question, body.topics);
+    } catch (err) {
+      if (err instanceof InvalidTopicError || err instanceof TooManyTopicsError)
+        throw new BadRequestException(err.message);
+      this.logger.warn(`chat failed: ${String(err)}`);
+      this.begin(res);
+      send(res, 'error', { message: 'The answer could not be completed' });
+      res.end();
+      return;
+    }
+    this.begin(res);
+    try {
       send(res, 'sources', answer.sources);
       for await (const text of answer.tokens) send(res, 'delta', { text });
       send(res, 'done', {});
@@ -43,5 +54,14 @@ export class ChatController {
       send(res, 'error', { message: 'The answer could not be completed' });
     }
     res.end();
+  }
+
+  private begin(res: Response): void {
+    res.status(200).set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.flushHeaders();
   }
 }

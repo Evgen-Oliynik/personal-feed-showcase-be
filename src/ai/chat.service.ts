@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../config/config.js';
 import type { DbHandle } from '../db/database.js';
 import { DB_HANDLE } from '../db/db.module.js';
+import { FeedComposer } from '../feed/feed-composer.js';
 import { localDate } from '../feed/feed.service.js';
 import { EMBEDDER, type Embedder } from './embedder.js';
 import { LLM, type Llm } from './llm.js';
@@ -46,10 +47,11 @@ export class ChatService {
     @Inject(EMBEDDER) private readonly embedder: Embedder,
     @Inject(LLM) private readonly llm: Llm,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly composer: FeedComposer,
   ) {}
 
-  async answer(question: string): Promise<ChatAnswer> {
-    const rows = await this.retrieve(question);
+  async answer(question: string, topics: string[]): Promise<ChatAnswer> {
+    const rows = await this.retrieve(question, topics);
     if (rows.length === 0) {
       return { sources: [], tokens: single(NOT_COVERED) };
     }
@@ -74,21 +76,15 @@ export class ChatService {
     };
   }
 
-  private async retrieve(question: string): Promise<Row[]> {
+  private async retrieve(question: string, topics: string[]): Promise<Row[]> {
     const { sqlite } = this.handle;
-    const today = sqlite
-      .prepare(
-        `SELECT DISTINCT m.id, m.title, m.url, m.type, m.source, m.summary
-         FROM topic_items t JOIN media_items m ON m.id = t.media_item_id
-         WHERE t.fetch_date = ?`,
-      )
-      .all(localDate()) as Row[];
-    if (today.length === 0) return [];
-    const byId = new Map(today.map((r) => [r.id, r]));
+    const feed = await this.composer.compose(topics, localDate());
+    if (feed.length === 0) return [];
+    const byId = new Map<number, Row>(feed.map((r) => [r.id, r]));
 
     const [vector] = await this.embedder.embed([question]);
-    // KNN runs over every embedding, then is restricted to today's entries,
-    // so k must cover the whole table or older items could crowd today's out.
+    // KNN runs over every embedding, then is restricted to the feed's items,
+    // so k must cover the whole table or other items could crowd them out.
     const hits = sqlite
       .prepare(
         'SELECT media_item_id, distance FROM item_embeddings WHERE embedding MATCH ? AND k = ?',

@@ -37,7 +37,7 @@ describe('Chat (e2e)', () => {
     await app.close();
   });
 
-  it('streams sources, deltas, then done with URLs from today’s feed', async () => {
+  it('streams sources, deltas, then done with URLs from the topics’ feed', async () => {
     const http = app.getHttpServer();
     const feed = await request(http)
       .get('/feed/today')
@@ -47,7 +47,7 @@ describe('Chat (e2e)', () => {
 
     const res = await request(http)
       .post('/chat')
-      .send({ question: '  react  ' })
+      .send({ question: '  react  ', topics: ['react'] })
       .expect(200);
     expect(res.headers['content-type']).toContain('text/event-stream');
 
@@ -61,15 +61,16 @@ describe('Chat (e2e)', () => {
 
     const sources = events[0]!.data as { url: string }[];
     expect(sources.length).toBeGreaterThan(0);
-    // Chat reads the topic pools, which hold more than the capped feed.
     expect(urls.length).toBeGreaterThan(0);
-    for (const s of sources) expect(s.url).toMatch(/^https:\/\/example\.test\//);
+    for (const s of sources) expect(urls).toContain(s.url);
+    for (const s of sources)
+      expect(s.url).toMatch(/^https:\/\/example\.test\//);
     expect((events[1]!.data as { text: string }).text).toEqual(
       expect.any(String),
     );
   });
 
-  it('streams the not-in-materials answer with empty sources when the feed is empty', async () => {
+  it('streams the not-in-materials answer with empty sources when no topics are given', async () => {
     const res = await request(app.getHttpServer())
       .post('/chat')
       .send({ question: 'anything?' })
@@ -89,6 +90,17 @@ describe('Chat (e2e)', () => {
     await request(http)
       .post('/chat')
       .send({ question: 'x'.repeat(501) })
+      .expect(400);
+    await request(http)
+      .post('/chat')
+      .send({
+        question: 'hi',
+        topics: Array.from({ length: 11 }, (_, i) => `t${i}`),
+      })
+      .expect(400);
+    await request(http)
+      .post('/chat')
+      .send({ question: 'hi', topics: ['!!!'] })
       .expect(400);
   });
 });
