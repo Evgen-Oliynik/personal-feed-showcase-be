@@ -13,7 +13,7 @@ import {
   normalizeTitle,
   PER_TYPE_CAP,
   type MediaItemRow,
-} from './feed-builder.js';
+} from './feed-items.js';
 import { TopicPool } from './topic-pool.js';
 
 export class InvalidTopicError extends Error {

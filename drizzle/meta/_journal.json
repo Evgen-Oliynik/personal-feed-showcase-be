@@ -50,6 +50,13 @@
       "when": 1794847785105,
       "tag": "0006_topic_fetches_per_source",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794848785105,
+      "tag": "0007_drop_server_feeds",
+      "breakpoints": true
     }
   ]
 }

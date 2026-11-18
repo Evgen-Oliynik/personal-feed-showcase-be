@@ -1,5 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { FeedBuilder, type MediaItemRow } from './feed-builder.js';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  FeedComposer,
+  InvalidTopicError,
+  TooManyTopicsError,
+} from './feed-composer.js';
+import type { MediaItemRow } from './feed-items.js';
 
 export const FEED_LIMITS = { read: 10, watch: 10, listen: 10 } as const;
 
@@ -19,7 +24,6 @@ export interface MediaItemDto {
 
 export interface FeedDto {
   date: string;
-  builtAt: string | null;
   limits: typeof FEED_LIMITS;
   counts: { read: number; watch: number; listen: number };
   items: MediaItemDto[];
@@ -34,24 +38,20 @@ export function localDate(now = new Date()): string {
 
 @Injectable()
 export class FeedService {
-  private readonly inFlight = new Map<string, Promise<FeedDto>>();
+  constructor(private readonly composer: FeedComposer) {}
 
-  constructor(private readonly builder: FeedBuilder) {}
-
-  today(): Promise<FeedDto> {
+  async today(topics: string[]): Promise<FeedDto> {
     const date = localDate();
-    let pending = this.inFlight.get(date);
-    if (!pending) {
-      pending = this.load(date).finally(() => this.inFlight.delete(date));
-      this.inFlight.set(date, pending);
+    let composed;
+    try {
+      composed = await this.composer.compose(topics, date);
+    } catch (err) {
+      if (err instanceof InvalidTopicError || err instanceof TooManyTopicsError)
+        throw new BadRequestException(err.message);
+      throw err;
     }
-    return pending;
-  }
-
-  private async load(date: string): Promise<FeedDto> {
-    const feed = await this.builder.build(date);
     const counts = { read: 0, watch: 0, listen: 0 };
-    const items = feed.items.map((row): MediaItemDto => {
+    const items = composed.map((row): MediaItemDto => {
       counts[row.type]++;
       return {
         id: row.id,
@@ -67,14 +67,8 @@ export class FeedService {
         durationSec: row.durationSec,
       };
     });
-    const dto: FeedDto = {
-      date,
-      builtAt: feed.builtAt,
-      limits: FEED_LIMITS,
-      counts,
-      items,
-    };
-    if (feed.builtAt === null) dto.reason = 'no-topics';
+    const dto: FeedDto = { date, limits: FEED_LIMITS, counts, items };
+    if (topics.length === 0) dto.reason = 'no-topics';
     return dto;
   }
 }

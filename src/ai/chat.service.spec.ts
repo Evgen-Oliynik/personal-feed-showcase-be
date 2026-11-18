@@ -22,8 +22,8 @@ describe('ChatService', () => {
   async function add(id: number, title: string, date: string | null) {
     handle.sqlite
       .prepare(
-        `INSERT INTO media_items(id,url,type,source,topic,title,summary,published_at,fetched_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO media_items(id,url,type,source,topic,title,summary,published_at,fetched_at,first_seen_date)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id,
@@ -35,11 +35,12 @@ describe('ChatService', () => {
         `About ${title}`,
         'p',
         'f',
+        'd',
       );
     if (date) {
       handle.sqlite
         .prepare(
-          'INSERT INTO feed_entries(feed_date,media_item_id,position) VALUES (?,?,0)',
+          "INSERT INTO topic_items(topic,fetch_date,media_item_id) VALUES ('t',?,?)",
         )
         .run(date, id);
     }

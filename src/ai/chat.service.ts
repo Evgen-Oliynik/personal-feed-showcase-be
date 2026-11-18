@@ -78,9 +78,9 @@ export class ChatService {
     const { sqlite } = this.handle;
     const today = sqlite
       .prepare(
-        `SELECT m.id, m.title, m.url, m.type, m.source, m.summary
-         FROM feed_entries f JOIN media_items m ON m.id = f.media_item_id
-         WHERE f.feed_date = ?`,
+        `SELECT DISTINCT m.id, m.title, m.url, m.type, m.source, m.summary
+         FROM topic_items t JOIN media_items m ON m.id = t.media_item_id
+         WHERE t.fetch_date = ?`,
       )
       .all(localDate()) as Row[];
     if (today.length === 0) return [];

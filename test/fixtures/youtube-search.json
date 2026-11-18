@@ -26,7 +26,10 @@
     },
     {
       "id": { "kind": "youtube#channel", "channelId": "UC1" },
-      "snippet": { "publishedAt": "2026-11-09T08:30:00Z", "title": "Not a video" }
+      "snippet": {
+        "publishedAt": "2026-11-09T08:30:00Z",
+        "title": "Not a video"
+      }
     }
   ]
 }

@@ -14,7 +14,7 @@ import {
   normalizeTitle,
   PER_SOURCE_LIMIT,
   type MediaItemRow,
-} from './feed-builder.js';
+} from './feed-items.js';
 
 /** The server's local date of an ISO timestamp, as YYYY-MM-DD. */
 const localDay = (iso: string) => {
