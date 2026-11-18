@@ -285,6 +285,7 @@ export class FeedBuilder {
           publishedAt: item.publishedAt,
           durationSec: item.durationSec ?? null,
           fetchedAt,
+          firstSeenDate: localDay(fetchedAt),
         })
         .onConflictDoNothing()
         .run();

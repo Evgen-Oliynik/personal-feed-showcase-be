@@ -29,6 +29,7 @@ describe('database', () => {
         summary: 's',
         publishedAt: '2026-01-01T00:00:00Z',
         fetchedAt: '2026-01-02T00:00:00Z',
+        firstSeenDate: '2026-01-02',
       })
       .returning()
       .get();

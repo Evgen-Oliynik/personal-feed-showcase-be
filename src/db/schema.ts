@@ -32,6 +32,7 @@ export const mediaItems = sqliteTable('media_items', {
   publishedAt: text('published_at').notNull(),
   durationSec: integer('duration_sec'),
   fetchedAt: text('fetched_at').notNull(),
+  firstSeenDate: text('first_seen_date').notNull(), // YYYY-MM-DD, set on insert only
 });
 
 export const feedEntries = sqliteTable(
@@ -60,3 +61,31 @@ export const feedTopicFetches = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.feedDate, t.topic] })],
 );
+
+/** Topics fetched for a date: a topic is never fetched twice a day. */
+export const topicFetches = sqliteTable(
+  'topic_fetches',
+  {
+    topic: text('topic').notNull(),
+    fetchDate: text('fetch_date').notNull(), // YYYY-MM-DD
+  },
+  (t) => [primaryKey({ columns: [t.topic, t.fetchDate] })],
+);
+
+/** The pool of a topic for a date. */
+export const topicItems = sqliteTable(
+  'topic_items',
+  {
+    topic: text('topic').notNull(),
+    fetchDate: text('fetch_date').notNull(), // YYYY-MM-DD
+    mediaItemId: integer('media_item_id')
+      .notNull()
+      .references(() => mediaItems.id),
+  },
+  (t) => [primaryKey({ columns: [t.topic, t.fetchDate, t.mediaItemId] })],
+);
+
+export const topicRequests = sqliteTable('topic_requests', {
+  topic: text('topic').primaryKey(),
+  lastRequestedDate: text('last_requested_date').notNull(), // YYYY-MM-DD
+});
