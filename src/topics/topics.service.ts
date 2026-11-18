@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, notInArray } from 'drizzle-orm';
 import { DB } from '../db/db.module.js';
 import type { AppDb } from '../db/database.js';
 import { topics } from '../db/schema.js';
@@ -37,6 +37,34 @@ export class TopicsService {
         `At most ${MAX_TOPICS} topics are allowed`,
       );
     return this.db.insert(topics).values({ name }).returning().get();
+  }
+
+  /** Replaces the whole set in one transaction: kept names keep id and createdAt. */
+  replace(names: string[]): TopicDto[] {
+    const unique = [...new Set(names)];
+    if (unique.length > MAX_TOPICS)
+      throw new UnprocessableEntityException(
+        `At most ${MAX_TOPICS} topics are allowed`,
+      );
+    this.db.transaction((tx) => {
+      tx.delete(topics).where(notInArray(topics.name, unique)).run();
+      const kept = new Set(
+        tx
+          .select()
+          .from(topics)
+          .all()
+          .map((t) => t.name),
+      );
+      const base = Date.now();
+      unique
+        .filter((name) => !kept.has(name))
+        .forEach((name, i) => {
+          tx.insert(topics)
+            .values({ name, createdAt: new Date(base + i).toISOString() })
+            .run();
+        });
+    });
+    return this.list();
   }
 
   remove(id: number): void {

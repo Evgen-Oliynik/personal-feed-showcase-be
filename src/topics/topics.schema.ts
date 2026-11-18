@@ -15,9 +15,15 @@ export const createTopicSchema = z.object({
     ),
 });
 
+export const replaceTopicsSchema = z.object({
+  names: z.array(createTopicSchema.shape.name).min(1),
+});
+
 export const topicIdSchema = z.coerce.number().int().positive();
 
 export type CreateTopicDto = z.infer<typeof createTopicSchema>;
+
+export type ReplaceTopicsDto = z.infer<typeof replaceTopicsSchema>;
 
 export interface TopicDto {
   id: number;

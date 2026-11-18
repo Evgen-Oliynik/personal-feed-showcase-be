@@ -69,4 +69,18 @@ describe('TopicsService', () => {
     expect(service.suggestions()).not.toContain('react');
     expect(service.suggestions()).toContain('typescript');
   });
+
+  it('replace keeps kept topics, drops removed, inserts new in order', () => {
+    const a = service.create('a');
+    service.create('b');
+    const out = service.replace(['c', 'a', 'd', 'c']);
+    expect(out.map((t) => t.name)).toEqual(['a', 'c', 'd']);
+    expect(out[0]).toEqual(a);
+  });
+
+  it('replace 422 over 10 distinct names', () => {
+    expect(() =>
+      service.replace(Array.from({ length: 11 }, (_, i) => `t${i}`)),
+    ).toThrow(UnprocessableEntityException);
+  });
 });
