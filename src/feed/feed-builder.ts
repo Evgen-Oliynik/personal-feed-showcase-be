@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray, ne } from 'drizzle-orm';
 import {
   ITEM_EMBEDDINGS,
   type ItemEmbeddingStore,
@@ -8,6 +8,7 @@ import type { AppDb } from '../db/database.js';
 import { DB } from '../db/db.module.js';
 import {
   feedEntries,
+  feedTopicFetches,
   feeds,
   mediaItems,
   topics,
@@ -27,6 +28,15 @@ export const normalizeTitle = (title: string) =>
     .replace(/[^\p{L}\p{N}\s]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+type Tx = Parameters<Parameters<AppDb['transaction']>[0]>[0];
+
+/** The server's local date of an ISO timestamp, as YYYY-MM-DD. */
+const localDay = (iso: string) => {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
 
 export type MediaItemRow = typeof mediaItems.$inferSelect;
 
@@ -48,7 +58,125 @@ export class FeedBuilder {
     @Inject(SOURCES) private readonly sources: MediaSource[],
   ) {}
 
-  async build(date: string): Promise<Feed> {
+  private readonly locks = new Map<string, Promise<unknown>>();
+
+  /** One build or re-select at a time per date. */
+  private exclusive<T>(date: string, fn: () => Promise<T>): Promise<T> {
+    const run = (this.locks.get(date) ?? Promise.resolve()).then(fn, fn);
+    const tail = run.catch(() => {});
+    this.locks.set(date, tail);
+    void tail.then(() => {
+      if (this.locks.get(date) === tail) this.locks.delete(date);
+    });
+    return run;
+  }
+
+  build(date: string): Promise<Feed> {
+    return this.exclusive(date, () => this.doBuild(date));
+  }
+
+  /**
+   * Adapts an already built feed to the current topics: drops entries of removed
+   * topics, fetches added topics once per date and fills the freed slots.
+   */
+  reselect(date: string): Promise<void> {
+    return this.exclusive(date, () => this.doReselect(date));
+  }
+
+  private async doReselect(date: string): Promise<void> {
+    if (!this.db.select().from(feeds).where(eq(feeds.feedDate, date)).get())
+      return;
+
+    const topicOrder = this.db
+      .select()
+      .from(topics)
+      .orderBy(asc(topics.createdAt), asc(topics.id))
+      .all()
+      .map((t) => t.name);
+    const fetchedTopics = new Set(
+      this.db
+        .select({ topic: feedTopicFetches.topic })
+        .from(feedTopicFetches)
+        .where(eq(feedTopicFetches.feedDate, date))
+        .all()
+        .map((r) => r.topic),
+    );
+    const added = topicOrder.filter((t) => !fetchedTopics.has(t));
+    const hasRemoved = this.load(date, '').items.some(
+      (i) => !topicOrder.includes(i.topic),
+    );
+    if (added.length === 0 && !hasRemoved) return;
+
+    const fetched = await this.fetchAll(added);
+    const fresh: MediaItemRow[] = [];
+
+    this.db.transaction((tx) => {
+      const fetchedAt = new Date().toISOString();
+      const kept = tx
+        .select({ item: mediaItems })
+        .from(feedEntries)
+        .innerJoin(mediaItems, eq(mediaItems.id, feedEntries.mediaItemId))
+        .where(eq(feedEntries.feedDate, date))
+        .orderBy(asc(feedEntries.position))
+        .all()
+        .map((r) => r.item)
+        .filter((i) => topicOrder.includes(i.topic));
+      const earlier = tx
+        .select({ id: mediaItems.id, title: mediaItems.title })
+        .from(feedEntries)
+        .innerJoin(mediaItems, eq(mediaItems.id, feedEntries.mediaItemId))
+        .where(ne(feedEntries.feedDate, date))
+        .all();
+      const seenTitles = new Set(
+        [...earlier, ...kept]
+          .map((e) => normalizeTitle(e.title))
+          .filter(Boolean),
+      );
+      const used = new Set([...earlier, ...kept].map((e) => e.id));
+
+      const rows = this.upsertItems(tx, fetched, seenTitles, fetchedAt);
+      const rowIds = new Set(rows.map((r) => r.id));
+      // Items of current topics fetched earlier today that did not fit at build time.
+      const leftovers = tx
+        .select()
+        .from(mediaItems)
+        .where(inArray(mediaItems.topic, topicOrder))
+        .all()
+        .filter((m) => !rowIds.has(m.id) && localDay(m.fetchedAt) === date)
+        .filter((m) => {
+          const title = normalizeTitle(m.title);
+          if (used.has(m.id) || (title && seenTitles.has(title))) return false;
+          if (title) seenTitles.add(title);
+          return true;
+        });
+      const candidates = [...rows, ...leftovers].filter((r) => !used.has(r.id));
+
+      const order = this.interleave(
+        MEDIA_TYPES.map((type) =>
+          this.select(
+            candidates.filter((r) => r.type === type),
+            topicOrder,
+            PER_TYPE_CAP - kept.filter((k) => k.type === type).length,
+          ),
+        ),
+      );
+      fresh.push(...order);
+
+      tx.delete(feedEntries).where(eq(feedEntries.feedDate, date)).run();
+      [...kept, ...order].forEach((item, position) =>
+        tx
+          .insert(feedEntries)
+          .values({ feedDate: date, mediaItemId: item.id, position })
+          .run(),
+      );
+      for (const topic of added)
+        tx.insert(feedTopicFetches).values({ feedDate: date, topic }).run();
+    });
+
+    await this.embeddings.embedMissing(fresh); // never throws
+  }
+
+  private async doBuild(date: string): Promise<Feed> {
     const stored = this.db
       .select()
       .from(feeds)
@@ -74,7 +202,6 @@ export class FeedBuilder {
       if (tx.select().from(feeds).where(eq(feeds.feedDate, date)).get()) return;
 
       const fetchedAt = new Date().toISOString();
-      const seen = new Set<string>();
       // Titles already shown on earlier days.
       const seenTitles = new Set(
         tx
@@ -85,38 +212,7 @@ export class FeedBuilder {
           .map((e) => normalizeTitle(e.title))
           .filter(Boolean),
       );
-      const rows: MediaItemRow[] = [];
-      for (const { topic, item } of fetched) {
-        if (seen.has(item.url)) continue; // the first topic wins
-        const title = normalizeTitle(item.title);
-        if (title && seenTitles.has(title)) continue; // cross-posted: first in source order wins
-        seen.add(item.url);
-        if (title) seenTitles.add(title);
-        tx.insert(mediaItems)
-          .values({
-            url: item.url,
-            type: classify(item),
-            source: item.source,
-            topic,
-            title: item.title,
-            summary: item.summary,
-            content: item.content ?? null,
-            author: item.author ?? null,
-            imageUrl: item.imageUrl ?? null,
-            publishedAt: item.publishedAt,
-            durationSec: item.durationSec ?? null,
-            fetchedAt,
-          })
-          .onConflictDoNothing()
-          .run();
-        rows.push(
-          tx
-            .select()
-            .from(mediaItems)
-            .where(eq(mediaItems.url, item.url))
-            .get()!,
-        );
-      }
+      const rows = this.upsertItems(tx, fetched, seenTitles, fetchedAt);
 
       const used = new Set(
         tx
@@ -133,18 +229,18 @@ export class FeedBuilder {
         ),
       );
 
-      const order: { item: MediaItemRow; rank: number; typeIdx: number }[] = [];
-      ranked.forEach((list, typeIdx) =>
-        list.forEach((item, rank) => order.push({ item, rank, typeIdx })),
-      );
-      order.sort((a, b) => a.rank - b.rank || a.typeIdx - b.typeIdx);
+      const order = this.interleave(ranked);
 
-      order.forEach(({ item }, position) =>
+      order.forEach((item, position) =>
         tx
           .insert(feedEntries)
           .values({ feedDate: date, mediaItemId: item.id, position })
           .run(),
       );
+      for (const { name } of topicRows)
+        tx.insert(feedTopicFetches)
+          .values({ feedDate: date, topic: name })
+          .run();
       tx.insert(feeds)
         .values({ feedDate: date, builtAt: new Date().toISOString() })
         .run();
@@ -158,6 +254,55 @@ export class FeedBuilder {
     const feed = this.load(date, row.builtAt);
     await this.embeddings.embedMissing(feed.items); // never throws
     return feed;
+  }
+
+  /** Inserts the fetched items (first topic wins, title duplicates skipped) and returns their rows. */
+  private upsertItems(
+    tx: Tx,
+    fetched: { topic: string; item: RawMediaItem }[],
+    seenTitles: Set<string>,
+    fetchedAt: string,
+  ) {
+    const seen = new Set<string>();
+    const rows: MediaItemRow[] = [];
+    for (const { topic, item } of fetched) {
+      if (seen.has(item.url)) continue; // the first topic wins
+      const title = normalizeTitle(item.title);
+      if (title && seenTitles.has(title)) continue; // cross-posted: first in source order wins
+      seen.add(item.url);
+      if (title) seenTitles.add(title);
+      tx.insert(mediaItems)
+        .values({
+          url: item.url,
+          type: classify(item),
+          source: item.source,
+          topic,
+          title: item.title,
+          summary: item.summary,
+          content: item.content ?? null,
+          author: item.author ?? null,
+          imageUrl: item.imageUrl ?? null,
+          publishedAt: item.publishedAt,
+          durationSec: item.durationSec ?? null,
+          fetchedAt,
+        })
+        .onConflictDoNothing()
+        .run();
+      rows.push(
+        tx.select().from(mediaItems).where(eq(mediaItems.url, item.url)).get()!,
+      );
+    }
+    return rows;
+  }
+
+  /** Interleaves per-type lists by rank, then by type. */
+  private interleave(ranked: MediaItemRow[][]) {
+    const order: { item: MediaItemRow; rank: number; typeIdx: number }[] = [];
+    ranked.forEach((list, typeIdx) =>
+      list.forEach((item, rank) => order.push({ item, rank, typeIdx })),
+    );
+    order.sort((a, b) => a.rank - b.rank || a.typeIdx - b.typeIdx);
+    return order.map((o) => o.item);
   }
 
   /** Fire-and-forget, one run at a time: a stored feed may hold items whose embedding failed earlier. */
@@ -177,21 +322,25 @@ export class FeedBuilder {
   }
 
   /** Round-robin across topics, newest first within a topic, up to the cap. */
-  private select(candidates: MediaItemRow[], topicOrder: string[]) {
+  private select(
+    candidates: MediaItemRow[],
+    topicOrder: string[],
+    cap = PER_TYPE_CAP,
+  ) {
     const groups = topicOrder.map((name) =>
       candidates
         .filter((c) => c.topic === name)
         .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)),
     );
     const picked: MediaItemRow[] = [];
-    for (let i = 0; picked.length < PER_TYPE_CAP; i++) {
+    for (let i = 0; picked.length < cap; i++) {
       let any = false;
       for (const g of groups) {
         const item = g[i];
         if (!item) continue;
         any = true;
         picked.push(item);
-        if (picked.length === PER_TYPE_CAP) break;
+        if (picked.length === cap) break;
       }
       if (!any) break;
     }

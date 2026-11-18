@@ -1,7 +1,8 @@
 import { ItemEmbeddings } from '../ai/item-embeddings.js';
+import { eq } from 'drizzle-orm';
 import { vi, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase, type DbHandle } from '../db/database.js';
-import { feedEntries, feeds, topics } from '../db/schema.js';
+import { feedEntries, feedTopicFetches, feeds, topics } from '../db/schema.js';
 import type { MediaSource, RawMediaItem } from '../sources/media-source.js';
 import { FeedBuilder } from './feed-builder.js';
 
@@ -192,6 +193,105 @@ describe('FeedBuilder', () => {
     ]);
     const feed = await b.build('2026-01-01');
     expect(feed.items.map((i) => i.topic)).toEqual(['a']);
+  });
+
+  describe('reselect', () => {
+    const calls: string[] = [];
+    const counting = (id: RawMediaItem['source'], n = 3) =>
+      source(id, (t) => {
+        calls.push(`${id}:${t}`);
+        return Array.from({ length: n }, (_, i) => ({
+          ...raw(id, t, day(i), `https://x.test/${id}/${t}/${i}`),
+          title: `${id} ${t} story ${i}`,
+        }));
+      });
+    const entries = (b: FeedBuilder) =>
+      b
+        .build('2026-01-01')
+        .then((f) => f.items.map((i) => i.topic + i.url.at(-1)));
+    const topicAt = (name: string, i: number) =>
+      h.db
+        .insert(topics)
+        .values({ name, createdAt: `2026-01-01T00:00:0${i}.000Z` })
+        .run();
+    beforeEach(() => {
+      calls.length = 0;
+    });
+
+    it('records the fetched topics on build', async () => {
+      addTopics('a', 'b');
+      await new FeedBuilder(h.db, noEmbeddings, [counting('devto')]).build(
+        '2026-01-01',
+      );
+      expect(
+        h.db
+          .select()
+          .from(feedTopicFetches)
+          .all()
+          .map((r) => r.topic)
+          .sort(),
+      ).toEqual(['a', 'b']);
+    });
+
+    it('does nothing when no feed exists', async () => {
+      addTopics('a');
+      const b = new FeedBuilder(h.db, noEmbeddings, [counting('devto')]);
+      await b.reselect('2026-01-01');
+      expect(calls).toEqual([]);
+      expect(h.db.select().from(feeds).all()).toEqual([]);
+    });
+
+    it('does nothing and fetches nothing when the topics are unchanged', async () => {
+      addTopics('a', 'b');
+      const b = new FeedBuilder(h.db, noEmbeddings, [counting('devto')]);
+      const before = await entries(b);
+      calls.length = 0;
+      await b.reselect('2026-01-01');
+      expect(calls).toEqual([]);
+      expect(await entries(b)).toEqual(before);
+    });
+
+    it('removes a removed topic and keeps the kept order', async () => {
+      addTopics('a', 'b');
+      const b = new FeedBuilder(h.db, noEmbeddings, [counting('devto')]);
+      const before = await b.build('2026-01-01');
+      const keptBefore = before.items
+        .filter((i) => i.topic === 'a')
+        .map((i) => i.id);
+      h.db.delete(topics).where(eq(topics.name, 'b')).run();
+      await b.reselect('2026-01-01');
+      const after = await b.build('2026-01-01');
+      expect(after.items.map((i) => i.id)).toEqual(keptBefore);
+      expect(calls.length).toBe(2); // only the build's fetches
+    });
+
+    it('fetches an added topic once, after the kept entries, within the caps', async () => {
+      addTopics('a');
+      const many = (id: RawMediaItem['source']) => counting(id, 9);
+      const b = new FeedBuilder(h.db, noEmbeddings, [many('devto')]);
+      const before = await b.build('2026-01-01');
+      topicAt('b', 5);
+      await b.reselect('2026-01-01');
+      await b.reselect('2026-01-01');
+      expect(calls.filter((c) => c === 'devto:b')).toHaveLength(1);
+      const after = await b.build('2026-01-01');
+      expect(after.items.slice(0, before.items.length)).toEqual(before.items);
+      expect(after.items.filter((i) => i.type === 'read')).toHaveLength(10);
+      expect(after.items.filter((i) => i.topic === 'b')).toHaveLength(1);
+    });
+
+    it('fills freed slots with the added topic', async () => {
+      addTopics('a', 'b');
+      const b = new FeedBuilder(h.db, noEmbeddings, [counting('devto', 6)]);
+      await b.build('2026-01-01'); // 12 candidates -> 10 read
+      h.db.delete(topics).where(eq(topics.name, 'b')).run();
+      topicAt('c', 7);
+      await b.reselect('2026-01-01');
+      const after = await b.build('2026-01-01');
+      expect(after.items.filter((i) => i.topic === 'a')).toHaveLength(5);
+      expect(after.items.filter((i) => i.topic === 'c')).toHaveLength(5);
+      expect(after.items.map((i) => i.topic)).not.toContain('b');
+    });
   });
 });
 
