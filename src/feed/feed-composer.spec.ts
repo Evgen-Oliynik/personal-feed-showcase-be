@@ -64,7 +64,7 @@ describe('FeedComposer', () => {
         .get();
     h.db
       .insert(topicFetches)
-      .values({ topic, fetchDate: DATE })
+      .values({ topic, fetchDate: DATE, source: 'devto' })
       .onConflictDoNothing()
       .run();
     h.db

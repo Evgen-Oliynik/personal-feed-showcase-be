@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ItunesSource } from './itunes.source.js';
 
@@ -64,23 +63,25 @@ describe('ItunesSource', () => {
     expect(items.map((i) => i.title)).toEqual(['Understanding React Hooks']);
   });
 
-  it('returns [] and warns on non-200', async () => {
+  it('rejects on non-200', async () => {
     stubFetch(async () => new Response('', { status: 500 }));
-    const warn = vi
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(() => undefined);
-    expect(await new ItunesSource().fetch('x', 5)).toEqual([]);
-    expect(warn).toHaveBeenCalledTimes(1);
+    await expect(new ItunesSource().fetch('x', 5)).rejects.toThrow('HTTP 500');
   });
 
-  it('returns [] and warns when fetch throws', async () => {
+  it('rejects when fetch throws', async () => {
     stubFetch(async () => {
       throw new Error('boom');
     });
-    const warn = vi
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(() => undefined);
+    await expect(new ItunesSource().fetch('x', 5)).rejects.toThrow('boom');
+  });
+
+  it('rejects on an unparsable body', async () => {
+    stubFetch(async () => new Response('not json', { status: 200 }));
+    await expect(new ItunesSource().fetch('x', 5)).rejects.toThrow();
+  });
+
+  it('resolves [] for a successful empty response', async () => {
+    stubFetch(async () => new Response('{"results":[]}', { status: 200 }));
     expect(await new ItunesSource().fetch('x', 5)).toEqual([]);
-    expect(warn).toHaveBeenCalledTimes(1);
   });
 });

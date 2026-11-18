@@ -81,7 +81,7 @@ describe('MediumSource', () => {
   });
 });
 
-describe('failures return [] and warn once', () => {
+describe('failures reject', () => {
   const cases: [string, () => Promise<Response>][] = [
     ['network error', async () => Promise.reject(new Error('ECONNRESET'))],
     [
@@ -93,12 +93,6 @@ describe('failures return [] and warn once', () => {
   ];
   it.each(cases)('%s', async (_name, impl) => {
     stubFetch(impl);
-    const source = new MediumSource();
-    const warn = vi.fn();
-    (source as unknown as { logger: { warn: unknown } }).logger.warn = warn;
-    expect(await source.fetch('react', 5)).toEqual([]);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String((warn.mock.calls[0] as unknown[])[0])).toContain('medium');
-    expect(String((warn.mock.calls[0] as unknown[])[0])).toContain('react');
+    await expect(new MediumSource().fetch('react', 5)).rejects.toThrow();
   });
 });

@@ -52,34 +52,28 @@ export class YoutubeSource implements MediaSource {
   async fetch(topic: string, limit: number): Promise<RawMediaItem[]> {
     const key = this.config.get('YOUTUBE_API_KEY', { infer: true });
     if (!key) return [];
-    try {
-      const params = new URLSearchParams({
-        part: 'snippet',
-        type: 'video',
-        order: 'relevance',
-        relevanceLanguage: 'en',
-        videoDuration: 'medium',
-        videoCategoryId: '28',
-        maxResults: String(limit),
-        q: topic,
-        publishedAfter: new Date(Date.now() - WINDOW_MS).toISOString(),
-        key,
-      });
-      const res = await fetch(`${SEARCH_URL}?${params}`, {
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { items?: SearchItem[] };
-      const items = (body.items ?? [])
-        .map((item) => this.toRaw(item))
-        .filter((item): item is RawMediaItem => item !== null);
-      await this.enrich(items, key);
-      return items;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`youtube fetch failed for topic "${topic}": ${reason}`);
-      return [];
-    }
+    const params = new URLSearchParams({
+      part: 'snippet',
+      type: 'video',
+      order: 'relevance',
+      relevanceLanguage: 'en',
+      videoDuration: 'medium',
+      videoCategoryId: '28',
+      maxResults: String(limit),
+      q: topic,
+      publishedAfter: new Date(Date.now() - WINDOW_MS).toISOString(),
+      key,
+    });
+    const res = await fetch(`${SEARCH_URL}?${params}`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+    const body = (await res.json()) as { items?: SearchItem[] };
+    const items = (body.items ?? [])
+      .map((item) => this.toRaw(item))
+      .filter((item): item is RawMediaItem => item !== null);
+    await this.enrich(items, key);
+    return items;
   }
 
   /** One batched videos.list call; on any failure keep the search data and warn once. */

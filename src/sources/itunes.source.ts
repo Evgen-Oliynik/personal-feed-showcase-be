@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { MediaSource, RawMediaItem } from './media-source.js';
 import { normalizeContent, normalizeSummary } from './classify.js';
 
@@ -36,40 +36,33 @@ function toMime(type?: string, ext?: string): string | undefined {
 @Injectable()
 export class ItunesSource implements MediaSource {
   readonly id = 'itunes';
-  private readonly logger = new Logger(ItunesSource.name);
 
   enabled(): boolean {
     return true;
   }
 
   async fetch(topic: string, limit: number): Promise<RawMediaItem[]> {
-    try {
-      const params = new URLSearchParams({
-        media: 'podcast',
-        entity: 'podcastEpisode',
-        term: topic,
-        limit: String(SEARCH_LIMIT),
-      });
-      const res = await fetch(`${SEARCH_URL}?${params}`, {
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { results?: ItunesResult[] };
-      const cutoff = Date.now() - WINDOW_MS;
-      return (body.results ?? [])
-        .filter((r) => r.genres?.some((g) => g.id === TECHNOLOGY_GENRE_ID))
-        .map((r) => this.toRaw(r))
-        .filter(
-          (item): item is RawMediaItem =>
-            item !== null && Date.parse(item.publishedAt) >= cutoff,
-        )
-        .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
-        .slice(0, limit);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`itunes fetch failed for topic "${topic}": ${reason}`);
-      return [];
-    }
+    const params = new URLSearchParams({
+      media: 'podcast',
+      entity: 'podcastEpisode',
+      term: topic,
+      limit: String(SEARCH_LIMIT),
+    });
+    const res = await fetch(`${SEARCH_URL}?${params}`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+    const body = (await res.json()) as { results?: ItunesResult[] };
+    const cutoff = Date.now() - WINDOW_MS;
+    return (body.results ?? [])
+      .filter((r) => r.genres?.some((g) => g.id === TECHNOLOGY_GENRE_ID))
+      .map((r) => this.toRaw(r))
+      .filter(
+        (item): item is RawMediaItem =>
+          item !== null && Date.parse(item.publishedAt) >= cutoff,
+      )
+      .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+      .slice(0, limit);
   }
 
   private toRaw(r: ItunesResult): RawMediaItem | null {

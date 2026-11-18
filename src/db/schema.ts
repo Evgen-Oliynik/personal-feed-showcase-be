@@ -62,14 +62,15 @@ export const feedTopicFetches = sqliteTable(
   (t) => [primaryKey({ columns: [t.feedDate, t.topic] })],
 );
 
-/** Topics fetched for a date: a topic is never fetched twice a day. */
+/** Sources that answered for a topic on a date: a source is not fetched again that day. */
 export const topicFetches = sqliteTable(
   'topic_fetches',
   {
     topic: text('topic').notNull(),
     fetchDate: text('fetch_date').notNull(), // YYYY-MM-DD
+    source: text('source').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.topic, t.fetchDate] })],
+  (t) => [primaryKey({ columns: [t.topic, t.fetchDate, t.source] })],
 );
 
 /** The pool of a topic for a date. */

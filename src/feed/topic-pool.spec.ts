@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase, type DbHandle } from '../db/database.js';
@@ -25,7 +26,10 @@ describe('TopicPool', () => {
     h = openDatabase(':memory:');
     embedMissing.mockClear();
   });
-  afterEach(() => h.sqlite.close());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    h.sqlite.close();
+  });
 
   const pool = (...sources: MediaSource[]) =>
     new TopicPool(h.db, { embedMissing }, sources);
@@ -83,6 +87,62 @@ describe('TopicPool', () => {
     );
     await expect(p.ensure('a', '2026-01-01')).resolves.toBeUndefined();
     expect(h.db.select().from(topicItems).all()).toHaveLength(1);
+  });
+
+  it('writes no row when every source rejects, and fetches again', async () => {
+    const warn = vi
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    let down = true;
+    const fetch = vi.fn(async () => {
+      if (down) throw new Error('boom');
+      return [raw('https://x.test/1')];
+    });
+    const p = pool(src(fetch, 'devto'), src(fetch, 'medium'));
+    await p.ensure('a', '2026-01-01');
+    expect(h.db.select().from(topicFetches).all()).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(2);
+    down = false;
+    await p.ensure('a', '2026-01-01');
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(
+      h.db
+        .select()
+        .from(topicFetches)
+        .all()
+        .map((r) => r.source)
+        .sort(),
+    ).toEqual(['devto', 'medium']);
+    expect(h.db.select().from(topicItems).all()).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('refetches only the source that rejected', async () => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    let down = true;
+    const good = vi.fn(async () => [raw('https://x.test/1')]);
+    const flaky = vi.fn(async () => {
+      if (down) throw new Error('boom');
+      return [raw('https://x.test/2')];
+    });
+    const p = pool(src(good, 'devto'), src(flaky, 'medium'));
+    await p.ensure('a', '2026-01-01');
+    expect(h.db.select().from(topicFetches).all()).toHaveLength(1);
+    down = false;
+    await p.ensure('a', '2026-01-01');
+    expect(good).toHaveBeenCalledTimes(1);
+    expect(flaky).toHaveBeenCalledTimes(2);
+    expect(h.db.select().from(topicFetches).all()).toHaveLength(2);
+    expect(h.db.select().from(topicItems).all()).toHaveLength(2);
+  });
+
+  it('does not refetch a source that resolved empty', async () => {
+    const fetch = vi.fn(async () => []);
+    const p = pool(src(fetch));
+    await p.ensure('a', '2026-01-01');
+    await p.ensure('a', '2026-01-01');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(h.db.select().from(topicFetches).all()).toHaveLength(1);
   });
 
   it('embeds new items only', async () => {

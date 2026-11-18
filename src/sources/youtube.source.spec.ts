@@ -88,7 +88,7 @@ describe('YoutubeSource', () => {
     expect(items[1]?.imageUrl).toBeUndefined();
   });
 
-  it('returns [] on quota errors, network errors and bad bodies', async () => {
+  it('rejects on quota errors, network errors and bad bodies', async () => {
     for (const impl of [
       async () => new Response('{"error":{}}', { status: 403 }),
       async () => {
@@ -97,7 +97,7 @@ describe('YoutubeSource', () => {
       async () => new Response('not json', { status: 200 }),
     ]) {
       stubFetch(impl);
-      expect(await source('k').fetch('react', 5)).toEqual([]);
+      await expect(source('k').fetch('react', 5)).rejects.toThrow();
     }
   });
 

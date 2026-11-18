@@ -48,16 +48,20 @@ export class TopicPool {
   }
 
   private async doEnsure(topic: string, date: string): Promise<void> {
-    const done = this.db
-      .select()
-      .from(topicFetches)
-      .where(
-        and(eq(topicFetches.topic, topic), eq(topicFetches.fetchDate, date)),
-      )
-      .get();
-    if (done) return;
+    const done = new Set(
+      this.db
+        .select({ source: topicFetches.source })
+        .from(topicFetches)
+        .where(
+          and(eq(topicFetches.topic, topic), eq(topicFetches.fetchDate, date)),
+        )
+        .all()
+        .map((r) => r.source),
+    );
+    const pending = this.sources.filter((s) => s.enabled() && !done.has(s.id));
+    if (pending.length === 0) return;
 
-    const fetched = await this.fetchAll(topic);
+    const { items: fetched, resolved } = await this.fetchAll(topic, pending);
     const inserted: MediaItemRow[] = [];
 
     this.db.transaction((tx) => {
@@ -114,28 +118,41 @@ export class TopicPool {
           .onConflictDoNothing()
           .run();
       }
-      tx.insert(topicFetches)
-        .values({ topic, fetchDate: date })
-        .onConflictDoNothing()
-        .run();
+      for (const source of resolved) {
+        tx.insert(topicFetches)
+          .values({ topic, fetchDate: date, source })
+          .onConflictDoNothing()
+          .run();
+      }
     });
 
     await this.embeddings.embedMissing(inserted); // never throws
   }
 
-  private async fetchAll(topic: string): Promise<RawMediaItem[]> {
-    const jobs = this.sources
-      .filter((s) => s.enabled())
-      .map(async (source) => {
+  /** Fetches each source; `resolved` lists those that answered, an empty answer included. */
+  private async fetchAll(
+    topic: string,
+    sources: MediaSource[],
+  ): Promise<{ items: RawMediaItem[]; resolved: MediaSource['id'][] }> {
+    const results = await Promise.all(
+      sources.map(async (source) => {
         try {
-          return await source.fetch(topic, PER_SOURCE_LIMIT);
+          return {
+            id: source.id,
+            items: await source.fetch(topic, PER_SOURCE_LIMIT),
+          };
         } catch (err) {
           this.logger.warn(
             `${source.id} failed for "${topic}": ${err instanceof Error ? err.message : String(err)}`,
           );
-          return [];
+          return null;
         }
-      });
-    return (await Promise.all(jobs)).flat();
+      }),
+    );
+    const ok = results.filter((r) => r !== null);
+    return {
+      items: ok.flatMap((r) => r.items),
+      resolved: ok.map((r) => r.id),
+    };
   }
 }
