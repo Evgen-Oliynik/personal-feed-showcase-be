@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../config/config.js';
 import { EMBEDDER, FakeEmbedder, LocalEmbedder } from './embedder.js';
 import { ChatService } from './chat.service.js';
-import { AnthropicLlm, FakeLlm, LLM } from './llm.js';
+import { OpenAiLlm, FakeLlm, LLM } from './llm.js';
 import { ItemEmbeddings, ITEM_EMBEDDINGS } from './item-embeddings.js';
 
 @Module({
@@ -22,7 +22,11 @@ import { ItemEmbeddings, ITEM_EMBEDDINGS } from './item-embeddings.js';
       useFactory: (config: ConfigService<AppConfig, true>) =>
         config.get('FAKE_EXTERNALS', { infer: true })
           ? new FakeLlm()
-          : new AnthropicLlm(config.get('ANTHROPIC_API_KEY', { infer: true })),
+          : new OpenAiLlm({
+              apiKey: config.get('OPENAI_API_KEY', { infer: true }),
+              model: config.get('OPENAI_MODEL', { infer: true }),
+              maxTokens: config.get('OPENAI_MAX_TOKENS', { infer: true }),
+            }),
     },
     ChatService,
     ItemEmbeddings,

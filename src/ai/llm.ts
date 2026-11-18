@@ -1,34 +1,39 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
 export const LLM = Symbol('LLM');
-export const LLM_MODEL = 'claude-sonnet-5-5';
-export const LLM_MAX_TOKENS = 1024;
 
 export interface Llm {
   stream(system: string, user: string): AsyncIterable<string>;
 }
 
-export class AnthropicLlm implements Llm {
-  private client: Anthropic | undefined;
+export interface OpenAiLlmOptions {
+  apiKey: string | undefined;
+  model: string;
+  maxTokens: number;
+}
 
-  constructor(private readonly apiKey: string | undefined) {}
+export class OpenAiLlm implements Llm {
+  private client: OpenAI | undefined;
+
+  constructor(private readonly options: OpenAiLlmOptions) {}
 
   async *stream(system: string, user: string): AsyncIterable<string> {
-    if (!this.apiKey) throw new Error('ANTHROPIC_API_KEY is not set');
-    this.client ??= new Anthropic({ apiKey: this.apiKey });
-    const events = this.client.messages.stream({
-      model: LLM_MODEL,
-      max_tokens: LLM_MAX_TOKENS,
-      system,
-      messages: [{ role: 'user', content: user }],
+    const { apiKey, model, maxTokens } = this.options;
+    if (!apiKey) throw new Error('OPENAI_API_KEY is not set');
+    this.client ??= new OpenAI({ apiKey });
+    const chunks = await this.client.chat.completions.create({
+      model,
+      // max_completion_tokens also bounds reasoning tokens
+      max_completion_tokens: maxTokens,
+      stream: true,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
     });
-    for await (const event of events) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
-        yield event.delta.text;
-      }
+    for await (const chunk of chunks) {
+      const text = chunk.choices[0]?.delta?.content;
+      if (text) yield text;
     }
   }
 }

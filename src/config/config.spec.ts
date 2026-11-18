@@ -9,6 +9,8 @@ describe('validateConfig', () => {
       FAKE_EXTERNALS: false,
       FEED_CRON: '0 6 * * *',
       CHAT_MAX_DISTANCE: 0.6,
+      OPENAI_MODEL: 'gpt-5.4-mini',
+      OPENAI_MAX_TOKENS: 4096,
       EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
     });
   });
