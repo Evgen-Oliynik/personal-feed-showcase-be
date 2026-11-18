@@ -3,6 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
+import { ChatService } from './../src/ai/chat.service.js';
 
 interface SseEvent {
   event: string;
@@ -85,5 +86,51 @@ describe('Chat (e2e)', () => {
       .post('/chat')
       .send({ question: 'x'.repeat(501) })
       .expect(400);
+  });
+});
+
+describe('Chat mid-stream error (e2e)', () => {
+  let app: INestApplication<App>;
+
+  beforeEach(async () => {
+    const source = {
+      n: 1,
+      id: 1,
+      title: 'A title',
+      url: 'https://example.com/a',
+      type: 'read' as const,
+      source: 'devto',
+    };
+    async function* tokens(): AsyncGenerator<string> {
+      yield 'partial';
+      throw new Error('llm down');
+    }
+    const moduleFixture = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(ChatService)
+      .useValue({
+        answer: () => Promise.resolve({ sources: [source], tokens: tokens() }),
+      })
+      .compile();
+    app = moduleFixture.createNestApplication();
+    await app.init();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('sends sources, one delta, then error and no done, and completes', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/chat')
+      .send({ question: 'anything?' })
+      .expect(200);
+    const events = parseSse(res.text);
+    expect(events.map((e) => e.event)).toEqual(['sources', 'delta', 'error']);
+    expect(events[1]!.data).toEqual({ text: 'partial' });
+    const { message } = events[2]!.data as { message: unknown };
+    expect(typeof message).toBe('string');
+    expect((message as string).length).toBeGreaterThan(0);
   });
 });
