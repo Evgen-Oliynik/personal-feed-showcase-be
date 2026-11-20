@@ -127,4 +127,49 @@ describe('rankFeedItems', () => {
       .get() as { c: number };
     expect(n.c).toBe(0);
   });
+
+  it('ranks every feed item although their chunks are not among the 4096 nearest', async () => {
+    const big = openDatabase(':memory:').sqlite;
+    const media = big.prepare(
+      `INSERT INTO media_items(id,url,type,source,topic,title,summary,published_at,fetched_at,first_seen_date)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    );
+    const chunk = big.prepare(
+      'INSERT INTO item_chunks(media_item_id, idx, text) VALUES (?, 0, ?)',
+    );
+    const emb = big.prepare(
+      'INSERT INTO chunk_embeddings(chunk_id, embedding) VALUES (?, ?)',
+    );
+    const add = (id: number, v: Float32Array) => {
+      media.run(
+        id,
+        `https://x.test/${id}`,
+        'read',
+        'devto',
+        't',
+        'T',
+        's',
+        'p',
+        'f',
+        'd',
+      );
+      const { lastInsertRowid } = chunk.run(id, 'text');
+      emb.run(BigInt(lastInsertRowid), v);
+    };
+    big.exec('BEGIN');
+    // 4100 decoys exactly on the query axis, far nearer than the feed items.
+    for (let id = 100; id < 4200; id++) add(id, vec(0));
+    const near = vec(0);
+    near[1] = 1;
+    near[2] = 3;
+    add(1, near); // feed item, nearer
+    add(2, vec(1)); // feed item, orthogonal
+    big.exec('COMMIT');
+    const out = await rankFeedItems(
+      { handle: { sqlite: big } as never, embedder },
+      'what is the',
+      [{ id: 2 }, { id: 1 }],
+    );
+    expect(out.map((i) => i.id)).toEqual([1, 2]);
+  });
 });

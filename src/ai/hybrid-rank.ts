@@ -1,8 +1,6 @@
 import type { DbHandle } from '../db/database.js';
 import type { Embedder } from './embedder.js';
 
-/** vec0 caps k at 4096. */
-const MAX_KNN = 4096;
 /** Reciprocal rank fusion constant. */
 export const RRF_K = 60;
 
@@ -68,17 +66,18 @@ export async function rankFeedItems<T extends RankableItem>(
   const ids = JSON.stringify(items.map((i) => i.id));
 
   const [vector] = await deps.embedder.embed([query], 'query');
-  // KNN runs over every chunk, then is restricted to the items, so k must
-  // cover the whole table or other items could crowd them out.
+  // Exact distance of every chunk of the given items; no global KNN, so the
+  // table's size cannot push an item out.
   const dense = sqlite
     .prepare(
-      `SELECT c.media_item_id AS id, min(e.distance) AS distance
-       FROM (SELECT chunk_id, distance FROM chunk_embeddings WHERE embedding MATCH ? AND k = ?) e
-       JOIN item_chunks c ON c.id = e.chunk_id
+      `SELECT c.media_item_id AS id,
+              min(vec_distance_cosine(e.embedding, ?)) AS distance
+       FROM item_chunks c
+       JOIN chunk_embeddings e ON e.chunk_id = c.id
        WHERE c.media_item_id IN (SELECT value FROM json_each(?))
        GROUP BY c.media_item_id ORDER BY distance`,
     )
-    .all(new Float32Array(vector!), BigInt(MAX_KNN), ids) as {
+    .all(new Float32Array(vector!), ids) as {
     id: number | bigint;
     distance: number;
   }[];

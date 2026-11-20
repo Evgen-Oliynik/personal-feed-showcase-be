@@ -32,7 +32,10 @@
       "indexes": {
         "feed_entries_feed_date_media_item_id_unique": {
           "name": "feed_entries_feed_date_media_item_id_unique",
-          "columns": ["feed_date", "media_item_id"],
+          "columns": [
+            "feed_date",
+            "media_item_id"
+          ],
           "isUnique": true
         }
       },
@@ -41,8 +44,12 @@
           "name": "feed_entries_media_item_id_media_items_id_fk",
           "tableFrom": "feed_entries",
           "tableTo": "media_items",
-          "columnsFrom": ["media_item_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "media_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -166,7 +173,9 @@
       "indexes": {
         "media_items_url_unique": {
           "name": "media_items_url_unique",
-          "columns": ["url"],
+          "columns": [
+            "url"
+          ],
           "isUnique": true
         }
       },
@@ -204,7 +213,9 @@
       "indexes": {
         "topics_name_unique": {
           "name": "topics_name_unique",
-          "columns": ["name"],
+          "columns": [
+            "name"
+          ],
           "isUnique": true
         }
       },
