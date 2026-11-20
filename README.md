@@ -1,132 +1,271 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Personal Feed API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+The backend of **Personal Feed**, a showcase of a limited, per-visitor daily media feed. A
+visitor picks a few tech topics; the API fetches articles, videos and podcast episodes about
+them, classifies each as **read**, **watch** or **listen**, composes a feed of at most 10 items
+per type, and answers questions about that feed with an AI chat grounded in it.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Built with NestJS 12, SQLite (Drizzle ORM + `sqlite-vec` + FTS5), local sentence embeddings
+(transformers.js) and OpenAI for chat answers. The frontend lives in
+[`personal-feed-showcase-fe`](https://github.com/Evgen-Oliynik/personal-feed-showcase-fe).
 
-## Description
+## Architecture
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
-
-```bash
-$ npm install
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     FRONTEND  (personal-feed-showcase-fe)                   │
+│        topics live in the browser (localStorage) and travel with requests   │
+└─────────────────────────────────────────────────────────────────────────────┘
+          │ GET /feed/today?topics=…        │ POST /chat { question, topics, history }
+          ▼                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PERSONAL FEED API  (NestJS 12)                      │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────────────────┐│
+│  │   Topics    │ │    Feed     │ │    Chat     │ │           AI            ││
+│  │ suggestions │ │  composer   │ │  SSE stream │ │ embedder · hybrid rank  ││
+│  └─────────────┘ └─────────────┘ └─────────────┘ │ · LLM                   ││
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ └─────────────────────────┘│
+│  │   Sources   │ │ Topic pools │ │  Scheduler  │                            │
+│  │ (4 sources) │ │ (per topic) │ │ (cron 06:00)│                            │
+│  └─────────────┘ └─────────────┘ └─────────────┘                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+      │                         │                         │
+      ▼                         ▼                         ▼
+┌───────────────────┐  ┌─────────────────────────┐  ┌───────────────────────┐
+│  External sources │  │  SQLite  (data/feed.db) │  │   OpenAI API          │
+│  dev.to · Medium  │  │  media items, pools     │  │   chat answers only   │
+│  YouTube · iTunes │  │  chunks + vec0 + FTS5   │  │   (gpt-5.4-mini)      │
+└───────────────────┘  └─────────────────────────┘  └───────────────────────┘
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │  Local embedding model  │
+                    │  bge-small-en-v1.5      │
+                    │  (data/models, no key)  │
+                    └─────────────────────────┘
 ```
 
-## Compile and run the project
+The server keeps **no per-visitor state**: no accounts, sessions or cookies. A topic is
+fetched from the sources at most once a day and shared by every visitor who follows it.
 
-```bash
-# development
-$ npm run start
+## Data Flow
 
-# watch mode
-$ npm run start:dev
+### Feed composition — `GET /feed/today?topics=react,rust`
 
-# production mode
-$ npm run start:prod
+```
+┌──────────┐   ┌──────────────────────────────────────────────────────────────┐
+│ Frontend │──►│ FeedComposer.compose(topics, today)                          │
+└──────────┘   │                                                              │
+               │ 1. Normalize topics (lowercase, ^[a-z0-9][a-z0-9 .+#-]*$,    │
+               │    1–40 chars, at most 10)                                   │
+               │ 2. TopicPool.ensure(topic, today) for each topic:            │
+               │    · fetch only sources not yet fetched for (topic, today)   │
+               │    · a source that fails is retried by the next request      │
+               │    · upsert items by URL; set first_seen_date on insert      │
+               │    · embed new items (chunks → vectors + FTS rows)           │
+               │ 3. Per type (read / watch / listen), up to 10 items:         │
+               │    · FRESH first: first seen today                           │
+               │    · then FILL: first seen 1–2 days ago                      │
+               │    · round-robin across topics, newest first                 │
+               │    · no duplicate URL or normalized title                    │
+               │ 4. Same topic list on the same day → same feed               │
+               └──────────────────────────────────────────────────────────────┘
 ```
 
-## Run tests
+### Chat — `POST /chat` (Server-Sent Events)
 
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+```
+┌──────────┐   ┌──────────────────────────────────────────────────────────────┐
+│ Frontend │──►│ ChatService.answer(question, topics, history)                │
+│ question │   │                                                              │
+│ + last 6 │   │ 1. Compose the visitor's feed (≤ 30 items)                   │
+│   pairs  │   │ 2. Embed any feed item that still has no chunks              │
+└──────────┘   │ 3. Rank every feed item (hybrid):                            │
+     ▲         │    · dense: cosine distance of its best chunk to the query   │
+     │         │    · lexical: FTS5 bm25() over chunk text                    │
+     │         │    · fused by reciprocal rank fusion, k = 60                 │
+     │         │ 4. Prompt: ALL feed items, ranked; top 8 with full content   │
+     │         │    + history messages + the question                         │
+     │         │ 5. OpenAI streams the answer, citing items as [n]            │
+     │         └──────────────────────────────────────────────────────────────┘
+     │                                  │
+     │         ┌────────────────────────┴─────────────────────────────────────┐
+     └─────────│  SSE:  event: sources  → every context item with its n       │
+               │        event: delta    → { text } chunks of the answer       │
+               │        event: done     → end of answer                       │
+               │        event: error    → { message }, stream ends            │
+               └──────────────────────────────────────────────────────────────┘
 ```
 
-## Deployment
+The chat answers **only from the visitor's feed**. When the feed does not contain the
+answer, or the feed is empty, the reply is exactly `This is not in the collected materials`.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## API
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | `{ "status": "ok" }` |
+| `GET` | `/topics/suggestions` | Fixed list of suggested topic names |
+| `GET` | `/feed/today?topics=a,b` | Today's feed for the topic list: `{ date, limits, counts, items }`; no topics → empty with `"reason": "no-topics"`; invalid name or more than 10 → `400` |
+| `POST` | `/chat` | Body `{ question (1–500), topics, history (≤ 12 × { role, content ≤ 4000 }) }`; responds with `text/event-stream` |
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+## Sources
+
+| Source | Type | How | Key |
+|--------|------|-----|-----|
+| **dev.to** | read | RSS `dev.to/feed/tag/<topic>` | — |
+| **Medium** | read | RSS `medium.com/feed/tag/<topic>` | — |
+| **YouTube** | watch | Data API v3 `search.list` (relevance, English, medium length, Science & Technology, last 7 days) + one batched `videos.list` for full descriptions and durations | `YOUTUBE_API_KEY` |
+| **iTunes** | listen | Search API, podcast episodes of genre Technology (id 1318) from the last 90 days | — |
+
+Each source fetches up to 15 items per topic. A source with a missing key is disabled with
+one warning at startup. Classification is rule-based: an audio enclosure → listen, a video
+enclosure or a YouTube URL → watch, iTunes → listen, otherwise read.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Framework | NestJS 12 (ESM, Express platform) |
+| Language | TypeScript 6 |
+| Database | SQLite via `better-sqlite3` + Drizzle ORM |
+| Vector search | `sqlite-vec` (vec0, cosine) |
+| Full-text search | SQLite FTS5 (`bm25()`) |
+| Embeddings | `@huggingface/transformers`, `Xenova/bge-small-en-v1.5` (384 dims, local) |
+| LLM | OpenAI SDK, `gpt-5.4-mini` (streaming Chat Completions) |
+| Validation | Zod via `StandardSchemaValidationPipe` |
+| Scheduling | `@nestjs/schedule` + `cron` |
+| Feeds | `rss-parser` |
+| Tests | Vitest + Supertest |
+| Lint / format | oxlint (type-aware) + Prettier |
+
+## Project Structure
+
+```
+personal-feed-showcase-be/
+├── src/
+│   ├── main.ts                 # Bootstrap: CORS for FRONTEND_ORIGIN, PORT
+│   ├── app.module.ts
+│   ├── config/                 # Zod-validated environment (config.ts)
+│   ├── db/                     # Drizzle schema, connection, sqlite-vec loading,
+│   │                           # migrations run on startup
+│   ├── health/                 # GET /health
+│   ├── topics/                 # GET /topics/suggestions, topic-name rule
+│   ├── sources/                # dev.to, Medium, YouTube, iTunes adapters,
+│   │   │                       # classify(), text normalization
+│   │   └── fixtures/           # Deterministic sources for FAKE_EXTERNALS=1
+│   ├── feed/
+│   │   ├── topic-pool.ts       # Per-topic daily cache, per-source retries
+│   │   ├── feed-composer.ts    # Fresh-then-fill, round-robin, dedup
+│   │   ├── feed.controller.ts  # GET /feed/today
+│   │   └── feed.scheduler.ts   # Cron prewarm of recently requested topics
+│   ├── ai/
+│   │   ├── embedder.ts         # LocalEmbedder (transformers.js), FakeEmbedder
+│   │   ├── chunks.ts           # Items → ≤ 3 chunks of ≤ 800 chars
+│   │   ├── item-embeddings.ts  # Chunks, vectors and FTS rows per item
+│   │   ├── hybrid-rank.ts      # Dense + BM25, reciprocal rank fusion
+│   │   ├── llm.ts              # OpenAiLlm, FakeLlm
+│   │   └── chat.service.ts     # Context building, grounding prompt
+│   └── chat/                   # POST /chat, SSE streaming, request schema
+│
+├── drizzle/                    # SQL migrations (0000–0009) and drizzle-kit metadata
+├── test/                       # In-process e2e specs (Supertest) and source fixtures
+├── data/                       # Runtime only, gitignored: feed.db, models/ cache
+└── .env.example
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Database
 
-## Observability
+| Table | Purpose |
+|-------|---------|
+| `media_items` | Every fetched item, unique by URL: type, source, title, summary (≤ 300 chars), content (≤ 2000 chars), author, image, published date, duration, `first_seen_date` |
+| `topic_fetches` | `(topic, fetch_date, source)`: which source already answered for a topic that day |
+| `topic_items` | `(topic, fetch_date, media_item_id)`: the topic's daily pool |
+| `topic_requests` | `(topic, last_requested_date)`: drives the cron prewarm; holds no visitor data |
+| `item_chunks` | Up to 3 text chunks per item |
+| `chunk_embeddings` | vec0 virtual table, `float[384]`, cosine distance |
+| `chunk_fts` | FTS5 virtual table over chunk text (`unicode61`, `#` and `+` kept in terms) |
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+Migrations in `drizzle/` run automatically on startup.
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
+## Getting Started
 
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
-
-```bash
-$ npx @nestjs/observe link
-```
-
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
-
-Or do it by hand:
+Requires **Node.js 24** and npm.
 
 ```bash
-$ npm install @nestjs/observe
+npm ci
+cp .env.example .env      # set OPENAI_API_KEY and YOUTUBE_API_KEY
+npm run start:dev         # http://localhost:4000
 ```
 
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
+The first feed request for a topic fetches it from the sources (~15 s). The first chat
+answer downloads the embedding model (~130 MB, cached in `data/models`) and embeds the
+feed, so it takes noticeably longer than later ones.
 
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
+To run without any API keys or network, set `FAKE_EXTERNALS=1`: sources, the embedder
+and the LLM are replaced by deterministic fixtures.
 
-## Resources
+## Scripts
 
-Check out a few resources that may come in handy when working with NestJS:
+### Development
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+| Command | Description |
+|---------|-------------|
+| `npm run start:dev` | Start in watch mode |
+| `npm run start:debug` | Start in watch mode with the debugger |
+| `npm run start` | Start once |
+| `npm run build` | Compile to `dist/` |
+| `npm run start:prod` | Run the compiled build |
 
-## Support
+### Quality
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+| Command | Description |
+|---------|-------------|
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | oxlint, type-aware, over `src/` and `test/` |
+| `npm run format` | Prettier over `src/` and `test/` |
 
-## Stay in touch
+### Tests
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+| Command | Description |
+|---------|-------------|
+| `npm test` | Unit tests (`src/**/*.spec.ts`) |
+| `npm run test:watch` | Unit tests in watch mode |
+| `npm run test:cov` | Unit tests with coverage |
+| `npm run test:e2e` | In-process e2e (`test/**/*.e2e-spec.ts`) with `FAKE_EXTERNALS=1` and an in-memory database |
 
-## License
+No test calls the network or loads the real embedding model.
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+### Database
+
+| Command | Description |
+|---------|-------------|
+| `npx drizzle-kit generate` | Generate a migration from schema changes |
+| `npx drizzle-kit generate --custom --name <name>` | Empty migration for virtual tables (vec0, FTS5), which drizzle-kit does not model |
+
+## Environment
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `4000` | HTTP port |
+| `FRONTEND_ORIGIN` | `http://localhost:3000` | The only origin allowed by CORS |
+| `DATABASE_PATH` | `./data/feed.db` | SQLite file; `:memory:` in tests |
+| `FAKE_EXTERNALS` | `false` | `1`/`true` replaces sources, embedder and LLM with fixtures |
+| `FEED_CRON` | `0 6 * * *` | Cron for prewarming topics requested in the last 7 days; validated at startup |
+| `OPENAI_API_KEY` | — | Required for real chat answers |
+| `OPENAI_MODEL` | `gpt-5.4-mini` | Chat model |
+| `OPENAI_MAX_TOKENS` | `4096` | `max_completion_tokens`, reasoning included |
+| `EMBEDDING_MODEL` | `Xenova/bge-small-en-v1.5` | Local embedding model; the embedder uses CLS pooling and bge's query prefix, so keep a bge model |
+| `YOUTUBE_API_KEY` | — | Enables the YouTube source |
+
+"Today" is the server's local date; set `TZ` to control it.
+
+## Notes
+
+- **ESM.** Relative imports end in `.js`, there is no `__dirname` (use `import.meta.dirname`),
+  and mocks are `vi.fn()`.
+- **YouTube quota.** A `search.list` call costs 100 of the default 10,000 daily units, so a
+  topic is fetched once a day for everyone, and only failed sources are retried.
+- **Embedding batch size** is 32 texts per model call, a common default that bounds peak
+  memory; it has not been benchmarked.
+- **Not included:** authentication, rate limiting, deployment configuration.
