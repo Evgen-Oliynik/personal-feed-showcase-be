@@ -53,6 +53,9 @@ export class ItemEmbeddings implements ItemEmbeddingStore {
       const insertVec = sqlite.prepare(
         'INSERT INTO chunk_embeddings(chunk_id, embedding) VALUES (?, ?)',
       );
+      const insertFts = sqlite.prepare(
+        'INSERT INTO chunk_fts(rowid, text) VALUES (?, ?)',
+      );
       sqlite.transaction(() => {
         pieces.forEach((p, i) => {
           const { lastInsertRowid } = insertChunk.run(
@@ -61,6 +64,7 @@ export class ItemEmbeddings implements ItemEmbeddingStore {
             p.text,
           );
           insertVec.run(BigInt(lastInsertRowid), new Float32Array(vectors[i]!));
+          insertFts.run(BigInt(lastInsertRowid), p.text);
         });
       })();
     } catch (err) {
