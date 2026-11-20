@@ -11,7 +11,7 @@ describe('validateConfig', () => {
       CHAT_MAX_DISTANCE: 0.6,
       OPENAI_MODEL: 'gpt-5.4-mini',
       OPENAI_MAX_TOKENS: 4096,
-      EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
+      EMBEDDING_MODEL: 'Xenova/bge-small-en-v1.5',
     });
   });
 
@@ -24,7 +24,7 @@ describe('validateConfig', () => {
     expect(c.PORT).toBe(5000);
     expect(c.FAKE_EXTERNALS).toBe(true);
     expect(c.YOUTUBE_API_KEY).toBe('k');
-    expect(c.EMBEDDING_MODEL).toBe('Xenova/all-MiniLM-L6-v2');
+    expect(c.EMBEDDING_MODEL).toBe('Xenova/bge-small-en-v1.5');
   });
 
   it('accepts a valid FEED_CRON', () => {

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { DbHandle } from '../db/database.js';
 import { DB_HANDLE } from '../db/db.module.js';
+import { chunkItem } from './chunks.js';
 import { EMBEDDER, type Embedder } from './embedder.js';
 
 export interface EmbeddableItem {
@@ -12,7 +13,7 @@ export interface EmbeddableItem {
 
 export const ITEM_EMBEDDINGS = Symbol('ITEM_EMBEDDINGS');
 
-/** Stores one embedding per media item in `item_embeddings`. */
+/** Stores chunks and their embeddings for each media item. */
 export interface ItemEmbeddingStore {
   embedMissing(items: EmbeddableItem[]): Promise<void>;
 }
@@ -26,26 +27,41 @@ export class ItemEmbeddings implements ItemEmbeddingStore {
     @Inject(EMBEDDER) private readonly embedder: Embedder,
   ) {}
 
-  /** Embeds the items that have no vector yet. A failure is logged, never thrown. */
+  /**
+   * Chunks and embeds the items that have no chunks yet, storing chunks and
+   * vectors in one transaction. A failure is logged, never thrown.
+   */
   async embedMissing(items: EmbeddableItem[]): Promise<void> {
     try {
       const { sqlite } = this.handle;
       const has = sqlite.prepare(
-        'SELECT 1 FROM item_embeddings WHERE media_item_id = ?',
+        'SELECT 1 FROM item_chunks WHERE media_item_id = ?',
       );
       const todo = items.filter((i) => !has.get(BigInt(i.id)));
       if (todo.length === 0) return;
 
-      const vectors = await this.embedder.embed(
-        todo.map((i) => `${i.title}\n${i.content ?? i.summary}`),
+      const pieces = todo.flatMap((item) =>
+        chunkItem(item).map((text, idx) => ({ item, idx, text })),
       );
-      const insert = sqlite.prepare(
-        'INSERT INTO item_embeddings(media_item_id, embedding) VALUES (?, ?)',
+      const vectors = await this.embedder.embed(
+        pieces.map((p) => `${p.item.title}\n${p.text}`),
+        'passage',
+      );
+      const insertChunk = sqlite.prepare(
+        'INSERT INTO item_chunks(media_item_id, idx, text) VALUES (?, ?, ?)',
+      );
+      const insertVec = sqlite.prepare(
+        'INSERT INTO chunk_embeddings(chunk_id, embedding) VALUES (?, ?)',
       );
       sqlite.transaction(() => {
-        todo.forEach((item, idx) =>
-          insert.run(BigInt(item.id), new Float32Array(vectors[idx]!)),
-        );
+        pieces.forEach((p, i) => {
+          const { lastInsertRowid } = insertChunk.run(
+            BigInt(p.item.id),
+            p.idx,
+            p.text,
+          );
+          insertVec.run(BigInt(lastInsertRowid), new Float32Array(vectors[i]!));
+        });
       })();
     } catch (err) {
       this.logger.warn(

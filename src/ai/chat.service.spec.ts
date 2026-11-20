@@ -55,10 +55,15 @@ describe('ChatService', () => {
       summary: `About ${title}`,
     });
     if (topic) feeds.set(topic, [...(feeds.get(topic) ?? []), id]);
-    const [v] = await embedder.embed([`${title}\nAbout ${title}`]);
+    const [v] = await embedder.embed([`${title}\nAbout ${title}`], 'passage');
     handle.sqlite
       .prepare(
-        'INSERT INTO item_embeddings(media_item_id, embedding) VALUES (?, ?)',
+        'INSERT INTO item_chunks(id, media_item_id, idx, text) VALUES (?, ?, 0, ?)',
+      )
+      .run(BigInt(id), BigInt(id), `About ${title}`);
+    handle.sqlite
+      .prepare(
+        'INSERT INTO chunk_embeddings(chunk_id, embedding) VALUES (?, ?)',
       )
       .run(BigInt(id), new Float32Array(v!));
   }

@@ -23,7 +23,7 @@ export const configSchema = z.object({
   OPENAI_API_KEY: optionalString,
   OPENAI_MODEL: z.string().min(1).default('gpt-5.4-mini'),
   OPENAI_MAX_TOKENS: z.coerce.number().int().min(1).default(4096),
-  EMBEDDING_MODEL: z.string().min(1).default('Xenova/all-MiniLM-L6-v2'),
+  EMBEDDING_MODEL: z.string().min(1).default('Xenova/bge-small-en-v1.5'),
   CHAT_MAX_DISTANCE: z.coerce.number().min(0).max(2).default(0.6),
   YOUTUBE_API_KEY: optionalString,
 });

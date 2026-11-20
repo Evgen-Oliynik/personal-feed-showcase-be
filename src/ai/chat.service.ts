@@ -82,12 +82,12 @@ export class ChatService {
     if (feed.length === 0) return [];
     const byId = new Map<number, Row>(feed.map((r) => [r.id, r]));
 
-    const [vector] = await this.embedder.embed([question]);
+    const [vector] = await this.embedder.embed([question], 'query');
     // KNN runs over every embedding, then is restricted to the feed's items,
     // so k must cover the whole table or other items could crowd them out.
     const hits = sqlite
       .prepare(
-        'SELECT media_item_id, distance FROM item_embeddings WHERE embedding MATCH ? AND k = ?',
+        'SELECT c.media_item_id, e.distance FROM (SELECT chunk_id, distance FROM chunk_embeddings WHERE embedding MATCH ? AND k = ?) e JOIN item_chunks c ON c.id = e.chunk_id ORDER BY e.distance',
       )
       .all(new Float32Array(vector!), BigInt(MAX_KNN)) as {
       media_item_id: number | bigint;
@@ -96,9 +96,14 @@ export class ChatService {
 
     const max = this.config.get('CHAT_MAX_DISTANCE', { infer: true });
     const out: Row[] = [];
+    const seen = new Set<number>();
     for (const h of hits) {
-      const row = byId.get(Number(h.media_item_id));
-      if (row && h.distance <= max) out.push(row);
+      const id = Number(h.media_item_id);
+      const row = byId.get(id);
+      if (row && !seen.has(id) && h.distance <= max) {
+        seen.add(id);
+        out.push(row);
+      }
       if (out.length === CHAT_TOP_K) break;
     }
     return out;

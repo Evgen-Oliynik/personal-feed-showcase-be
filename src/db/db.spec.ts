@@ -37,17 +37,17 @@ describe('database', () => {
     expect(db.select().from(topicItems).get()?.topic).toBe('ai');
   });
 
-  it('runs a KNN query on item_embeddings', () => {
+  it('runs a KNN query on chunk_embeddings', () => {
     const ins = h.sqlite.prepare(
-      'INSERT INTO item_embeddings(media_item_id, embedding) VALUES (?, ?)',
+      'INSERT INTO chunk_embeddings(chunk_id, embedding) VALUES (?, ?)',
     );
     ins.run(1n, vec(0));
     ins.run(2n, vec(1));
     const rows = h.sqlite
       .prepare(
-        'SELECT media_item_id, distance FROM item_embeddings WHERE embedding MATCH ? AND k = 1',
+        'SELECT chunk_id, distance FROM chunk_embeddings WHERE embedding MATCH ? AND k = 1',
       )
-      .all(vec(1)) as { media_item_id: number }[];
-    expect(rows.map((r) => r.media_item_id)).toEqual([2]);
+      .all(vec(1)) as { chunk_id: number }[];
+    expect(rows.map((r) => r.chunk_id)).toEqual([2]);
   });
 });
