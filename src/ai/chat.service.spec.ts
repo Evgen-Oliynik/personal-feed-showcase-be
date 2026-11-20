@@ -3,6 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { AppConfig } from '../config/config.js';
 import { openDatabase, type DbHandle } from '../db/database.js';
 import type { FeedComposer } from '../feed/feed-composer.js';
+import { ItemEmbeddings } from './item-embeddings.js';
 import { ChatService, NOT_COVERED } from './chat.service.js';
 import { FakeEmbedder } from './embedder.js';
 import type { Llm } from './llm.js';
@@ -17,6 +18,7 @@ describe('ChatService', () => {
   let handle: DbHandle;
   let llm: { stream: ReturnType<typeof vi.fn> };
   let service: ChatService;
+  let embedSpy: ReturnType<typeof vi.spyOn>;
   const embedder = new FakeEmbedder();
   /** topic → items in that topic's feed (what `FeedComposer.compose` returns). */
   const feeds = new Map<string, number[]>();
@@ -28,7 +30,12 @@ describe('ChatService', () => {
   });
   const rows = new Map<number, object>();
 
-  async function add(id: number, title: string, topic: string | null) {
+  async function add(
+    id: number,
+    title: string,
+    topic: string | null,
+    withChunks = true,
+  ) {
     handle.sqlite
       .prepare(
         `INSERT INTO media_items(id,url,type,source,topic,title,summary,published_at,fetched_at,first_seen_date)
@@ -53,8 +60,10 @@ describe('ChatService', () => {
       source: 'devto',
       title,
       summary: `About ${title}`,
+      content: null,
     });
     if (topic) feeds.set(topic, [...(feeds.get(topic) ?? []), id]);
+    if (!withChunks) return;
     const [v] = await embedder.embed([`${title}\nAbout ${title}`], 'passage');
     handle.sqlite
       .prepare(
@@ -83,12 +92,21 @@ describe('ChatService', () => {
       AppConfig,
       true
     >;
-    service = new ChatService(handle, embedder, llm as unknown as Llm, config, {
-      compose,
-    } as unknown as FeedComposer);
+    embedSpy = vi.spyOn(embedder, 'embed');
+    service = new ChatService(
+      handle,
+      embedder,
+      llm as unknown as Llm,
+      config,
+      { compose } as unknown as FeedComposer,
+      new ItemEmbeddings(handle, embedder),
+    );
   });
 
-  afterEach(() => handle.sqlite.close());
+  afterEach(() => {
+    embedSpy.mockRestore();
+    handle.sqlite.close();
+  });
 
   it('does not call the LLM when nothing matches', async () => {
     await add(1, 'rust async runtime', 'a');
@@ -129,5 +147,22 @@ describe('ChatService', () => {
     expect(res.sources).toEqual([]);
     expect(await collect(res.tokens)).toBe(NOT_COVERED);
     expect(llm.stream).not.toHaveBeenCalled();
+  });
+
+  it('embeds a feed item with no chunks before retrieval, then finds it', async () => {
+    await add(1, 'rust async runtime', 'a', false);
+    const res = await service.answer('rust async runtime', ['a']);
+    expect(res.sources.map((s) => s.id)).toEqual([1]);
+    const chunks = handle.sqlite
+      .prepare('SELECT count(*) AS n FROM item_chunks WHERE media_item_id = 1')
+      .get() as { n: number };
+    expect(chunks.n).toBe(1);
+  });
+
+  it('makes no passage embedding call when every item has chunks', async () => {
+    await add(1, 'rust async runtime', 'a');
+    embedSpy.mockClear();
+    await service.answer('rust async runtime', ['a']);
+    expect(embedSpy.mock.calls.map((c: unknown[]) => c[1])).toEqual(['query']);
   });
 });

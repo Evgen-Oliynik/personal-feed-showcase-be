@@ -6,6 +6,7 @@ import { DB_HANDLE } from '../db/db.module.js';
 import { FeedComposer } from '../feed/feed-composer.js';
 import { localDate } from '../feed/feed.service.js';
 import { EMBEDDER, type Embedder } from './embedder.js';
+import { ITEM_EMBEDDINGS, type ItemEmbeddingStore } from './item-embeddings.js';
 import { LLM, type Llm } from './llm.js';
 
 export const NOT_COVERED = 'This is not in the collected materials';
@@ -48,6 +49,7 @@ export class ChatService {
     @Inject(LLM) private readonly llm: Llm,
     private readonly config: ConfigService<AppConfig, true>,
     private readonly composer: FeedComposer,
+    @Inject(ITEM_EMBEDDINGS) private readonly embeddings: ItemEmbeddingStore,
   ) {}
 
   async answer(question: string, topics: string[]): Promise<ChatAnswer> {
@@ -80,6 +82,8 @@ export class ChatService {
     const { sqlite } = this.handle;
     const feed = await this.composer.compose(topics, localDate());
     if (feed.length === 0) return [];
+    // Items whose embedding failed at fetch time are embedded now (no-op when none are missing).
+    await this.embeddings.embedMissing(feed);
     const byId = new Map<number, Row>(feed.map((r) => [r.id, r]));
 
     const [vector] = await this.embedder.embed([question], 'query');
