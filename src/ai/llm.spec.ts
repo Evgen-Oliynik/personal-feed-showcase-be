@@ -33,7 +33,13 @@ describe('OpenAiLlm', () => {
         yield chunk('lo');
       })(),
     );
-    const parts = await collect(new OpenAiLlm(options).stream('sys', 'usr'));
+    const parts = await collect(
+      new OpenAiLlm(options).stream('sys', [
+        { role: 'user', content: 'q1' },
+        { role: 'assistant', content: 'a1' },
+        { role: 'user', content: 'usr' },
+      ]),
+    );
     expect(parts).toEqual(['Hel', 'lo']);
     expect(parts.join('')).toBe('Hello');
     expect(create).toHaveBeenCalledWith({
@@ -42,6 +48,8 @@ describe('OpenAiLlm', () => {
       stream: true,
       messages: [
         { role: 'system', content: 'sys' },
+        { role: 'user', content: 'q1' },
+        { role: 'assistant', content: 'a1' },
         { role: 'user', content: 'usr' },
       ],
     });
@@ -49,9 +57,9 @@ describe('OpenAiLlm', () => {
 
   it('throws when the API key is missing', async () => {
     const llm = new OpenAiLlm({ ...options, apiKey: undefined });
-    await expect(collect(llm.stream('s', 'u'))).rejects.toThrow(
-      'OPENAI_API_KEY is not set',
-    );
+    await expect(
+      collect(llm.stream('s', [{ role: 'user', content: 'u' }])),
+    ).rejects.toThrow('OPENAI_API_KEY is not set');
     expect(create).not.toHaveBeenCalled();
   });
 });

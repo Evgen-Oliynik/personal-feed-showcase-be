@@ -34,7 +34,7 @@ export class ChatController {
   ): Promise<void> {
     let answer: ChatAnswer;
     try {
-      answer = await this.chat.answer(body.question, body.topics);
+      answer = await this.chat.answer(body.question, body.topics, body.history);
     } catch (err) {
       if (err instanceof InvalidTopicError || err instanceof TooManyTopicsError)
         throw new BadRequestException(err.message);

@@ -83,6 +83,47 @@ describe('Chat (e2e)', () => {
     );
   });
 
+  it('accepts a conversation history and streams as usual', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/chat')
+      .send({
+        question: 'tell me more',
+        topics: ['react'],
+        history: [
+          { role: 'user', content: 'react' },
+          { role: 'assistant', content: 'According to the materials [1].' },
+        ],
+      })
+      .expect(200);
+    const names = parseSse(res.text).map((e) => e.event);
+    expect(names[0]).toBe('sources');
+    expect(names.at(-1)).toBe('done');
+  });
+
+  it('400 on a history of 13 messages or an invalid message', async () => {
+    const http = app.getHttpServer();
+    const msg = { role: 'user', content: 'hi' };
+    await request(http)
+      .post('/chat')
+      .send({ question: 'hi', history: Array.from({ length: 13 }, () => msg) })
+      .expect(400);
+    await request(http)
+      .post('/chat')
+      .send({ question: 'hi', history: [{ role: 'user', content: '' }] })
+      .expect(400);
+    await request(http)
+      .post('/chat')
+      .send({
+        question: 'hi',
+        history: [{ role: 'user', content: 'x'.repeat(4001) }],
+      })
+      .expect(400);
+    await request(http)
+      .post('/chat')
+      .send({ question: 'hi', history: [{ role: 'system', content: 'x' }] })
+      .expect(400);
+  });
+
   it('400 on a blank or too long question', async () => {
     const http = app.getHttpServer();
     await request(http).post('/chat').send({ question: '   ' }).expect(400);

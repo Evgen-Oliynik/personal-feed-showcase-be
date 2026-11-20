@@ -6,7 +6,7 @@ import { localDate } from '../feed/feed.service.js';
 import { EMBEDDER, type Embedder } from './embedder.js';
 import { rankFeedItems } from './hybrid-rank.js';
 import { ITEM_EMBEDDINGS, type ItemEmbeddingStore } from './item-embeddings.js';
-import { LLM, type Llm } from './llm.js';
+import { LLM, type Llm, type LlmMessage } from './llm.js';
 
 export const NOT_COVERED = 'This is not in the collected materials';
 /** Most feed items the chat sees. */
@@ -54,8 +54,15 @@ export class ChatService {
     @Inject(ITEM_EMBEDDINGS) private readonly embeddings: ItemEmbeddingStore,
   ) {}
 
-  async answer(question: string, topics: string[]): Promise<ChatAnswer> {
-    const rows = await this.rankedFeed(question, topics);
+  async answer(
+    question: string,
+    topics: string[],
+    history: LlmMessage[] = [],
+  ): Promise<ChatAnswer> {
+    // A follow-up ("tell me more about it") is ranked together with the previous user turn.
+    const previous = history.findLast((m) => m.role === 'user');
+    const query = previous ? `${previous.content}\n${question}` : question;
+    const rows = await this.rankedFeed(query, topics);
     if (rows.length === 0) {
       return { sources: [], tokens: single(NOT_COVERED) };
     }
@@ -78,7 +85,10 @@ export class ChatService {
         type: r.type,
         source: r.source,
       })),
-      tokens: this.llm.stream(CHAT_SYSTEM_PROMPT, user),
+      tokens: this.llm.stream(CHAT_SYSTEM_PROMPT, [
+        ...history,
+        { role: 'user', content: user },
+      ]),
     };
   }
 

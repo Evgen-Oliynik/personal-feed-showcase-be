@@ -2,8 +2,13 @@ import OpenAI from 'openai';
 
 export const LLM = Symbol('LLM');
 
+export interface LlmMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface Llm {
-  stream(system: string, user: string): AsyncIterable<string>;
+  stream(system: string, messages: LlmMessage[]): AsyncIterable<string>;
 }
 
 export interface OpenAiLlmOptions {
@@ -17,7 +22,7 @@ export class OpenAiLlm implements Llm {
 
   constructor(private readonly options: OpenAiLlmOptions) {}
 
-  async *stream(system: string, user: string): AsyncIterable<string> {
+  async *stream(system: string, messages: LlmMessage[]): AsyncIterable<string> {
     const { apiKey, model, maxTokens } = this.options;
     if (!apiKey) throw new Error('OPENAI_API_KEY is not set');
     this.client ??= new OpenAI({ apiKey });
@@ -26,10 +31,7 @@ export class OpenAiLlm implements Llm {
       // max_completion_tokens also bounds reasoning tokens
       max_completion_tokens: maxTokens,
       stream: true,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
+      messages: [{ role: 'system', content: system }, ...messages],
     });
     for await (const chunk of chunks) {
       const text = chunk.choices[0]?.delta?.content;

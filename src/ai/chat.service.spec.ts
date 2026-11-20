@@ -120,7 +120,11 @@ describe('ChatService', () => {
       [3, 3],
     ]);
     expect(await collect(res.tokens)).toBe('ok [1]');
-    const [system, user] = llm.stream.mock.calls[0] as [string, string];
+    const [system, msgs] = llm.stream.mock.calls[0] as [
+      string,
+      { role: string; content: string }[],
+    ];
+    const user = msgs[0]!.content;
     expect(system).toContain(NOT_COVERED);
     const lines = user.split('\n').filter((l) => /^\[\d+\]/.test(l));
     expect(lines).toEqual([
@@ -130,11 +134,39 @@ describe('ChatService', () => {
     ]);
   });
 
+  it('ranks with the previous user message plus the question, and sends history first', async () => {
+    await add(1, 'rust async tokio', 'a');
+    await add(2, 'banana smoothie', 'a');
+    embedSpy.mockClear();
+    const history = [
+      { role: 'user' as const, content: 'rust async tokio' },
+      { role: 'assistant' as const, content: 'It is a runtime [1].' },
+    ];
+    const res = await service.answer('tell me more about it', ['a'], history);
+    expect(embedSpy.mock.calls.at(-1)).toEqual([
+      ['rust async tokio\ntell me more about it'],
+      'query',
+    ]);
+    expect(res.sources[0]!.id).toBe(1);
+    const msgs = (llm.stream.mock.calls[0] as [string, unknown[]])[1];
+    expect(msgs.slice(0, 2)).toEqual(history);
+    expect(msgs).toHaveLength(3);
+  });
+
+  it('ranks by the question alone without history', async () => {
+    await add(1, 'rust async tokio', 'a');
+    embedSpy.mockClear();
+    await service.answer('rust', ['a']);
+    expect(embedSpy.mock.calls.at(-1)).toEqual([['rust'], 'query']);
+  });
+
   it('adds full content for the top 8 ranked items only', async () => {
     for (let id = 1; id <= 10; id++)
       await add(id, `rust async ${id}`, 'a', true, `BODY${id}`);
     const res = await service.answer('rust async', ['a']);
-    const [, user] = llm.stream.mock.calls[0] as [string, string];
+    const user = (
+      llm.stream.mock.calls[0] as [string, { content: string }[]]
+    )[1][0]!.content;
     expect(res.sources).toHaveLength(10);
     expect(user.match(/Full content: BODY\d+/g)).toHaveLength(8);
     const top = res.sources.slice(0, 8).map((s) => `BODY${s.id}`);
