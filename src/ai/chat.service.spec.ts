@@ -1,6 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ConfigService } from '@nestjs/config';
-import type { AppConfig } from '../config/config.js';
 import { openDatabase, type DbHandle } from '../db/database.js';
 import type { FeedComposer } from '../feed/feed-composer.js';
 import { ItemEmbeddings } from './item-embeddings.js';
@@ -35,6 +33,7 @@ describe('ChatService', () => {
     title: string,
     topic: string | null,
     withChunks = true,
+    content: string | null = null,
   ) {
     handle.sqlite
       .prepare(
@@ -60,7 +59,7 @@ describe('ChatService', () => {
       source: 'devto',
       title,
       summary: `About ${title}`,
-      content: null,
+      content,
     });
     if (topic) feeds.set(topic, [...(feeds.get(topic) ?? []), id]);
     if (!withChunks) return;
@@ -88,16 +87,11 @@ describe('ChatService', () => {
         yield 'ok [1]';
       }),
     };
-    const config = { get: () => 0.6 } as unknown as ConfigService<
-      AppConfig,
-      true
-    >;
     embedSpy = vi.spyOn(embedder, 'embed');
     service = new ChatService(
       handle,
       embedder,
       llm as unknown as Llm,
-      config,
       { compose } as unknown as FeedComposer,
       new ItemEmbeddings(handle, embedder),
     );
@@ -108,28 +102,53 @@ describe('ChatService', () => {
     handle.sqlite.close();
   });
 
-  it('does not call the LLM when nothing matches', async () => {
+  it('keeps a distant item in the context (no threshold)', async () => {
     await add(1, 'rust async runtime', 'a');
     const res = await service.answer('banana smoothie recipe', ['a']);
-    expect(res.sources).toEqual([]);
-    expect(await collect(res.tokens)).toBe(NOT_COVERED);
-    expect(llm.stream).not.toHaveBeenCalled();
+    expect(res.sources.map((s) => s.id)).toEqual([1]);
+    expect(llm.stream).toHaveBeenCalledOnce();
   });
 
-  it('numbers sources in retrieval order and builds the prompt', async () => {
+  it('puts every item in ranked order and numbers sources like the prompt', async () => {
     await add(1, 'rust async tokio', 'a');
     await add(2, 'rust async', 'a');
+    await add(3, 'banana smoothie', 'a');
     const res = await service.answer('rust async', ['a']);
     expect(res.sources.map((s) => [s.n, s.id])).toEqual([
       [1, 2],
       [2, 1],
+      [3, 3],
     ]);
     expect(await collect(res.tokens)).toBe('ok [1]');
     const [system, user] = llm.stream.mock.calls[0] as [string, string];
     expect(system).toContain(NOT_COVERED);
-    expect(user).toContain(
-      '[1] rust async — devto — https://x.test/2 — About rust async',
-    );
+    const lines = user.split('\n').filter((l) => /^\[\d+\]/.test(l));
+    expect(lines).toEqual([
+      '[1] rust async — devto — read — https://x.test/2 — About rust async',
+      '[2] rust async tokio — devto — read — https://x.test/1 — About rust async tokio',
+      '[3] banana smoothie — devto — read — https://x.test/3 — About banana smoothie',
+    ]);
+  });
+
+  it('adds full content for the top 8 ranked items only', async () => {
+    for (let id = 1; id <= 10; id++)
+      await add(id, `rust async ${id}`, 'a', true, `BODY${id}`);
+    const res = await service.answer('rust async', ['a']);
+    const [, user] = llm.stream.mock.calls[0] as [string, string];
+    expect(res.sources).toHaveLength(10);
+    expect(user.match(/Full content: BODY\d+/g)).toHaveLength(8);
+    const top = res.sources.slice(0, 8).map((s) => `BODY${s.id}`);
+    for (const b of top) expect(user).toContain(`Full content: ${b}`);
+    for (const s of res.sources.slice(8))
+      expect(user).not.toContain(`BODY${s.id}`);
+  });
+
+  it('does not call the LLM when the feed is empty', async () => {
+    await add(1, 'rust async runtime', null);
+    const res = await service.answer('rust async', ['a']);
+    expect(res.sources).toEqual([]);
+    expect(await collect(res.tokens)).toBe(NOT_COVERED);
+    expect(llm.stream).not.toHaveBeenCalled();
   });
 
   it('only retrieves items in the given topics’ feed', async () => {

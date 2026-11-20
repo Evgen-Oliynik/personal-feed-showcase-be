@@ -1,18 +1,18 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import type { AppConfig } from '../config/config.js';
 import type { DbHandle } from '../db/database.js';
 import { DB_HANDLE } from '../db/db.module.js';
 import { FeedComposer } from '../feed/feed-composer.js';
 import { localDate } from '../feed/feed.service.js';
 import { EMBEDDER, type Embedder } from './embedder.js';
+import { rankFeedItems } from './hybrid-rank.js';
 import { ITEM_EMBEDDINGS, type ItemEmbeddingStore } from './item-embeddings.js';
 import { LLM, type Llm } from './llm.js';
 
 export const NOT_COVERED = 'This is not in the collected materials';
-export const CHAT_TOP_K = 6;
-/** vec0 caps k at 4096. */
-const MAX_KNN = 4096;
+/** Most feed items the chat sees. */
+const FEED_LIMIT = 30;
+/** Ranked items that also carry their full content. */
+export const FULL_CONTENT_TOP = 8;
 
 export interface ChatSource {
   n: number;
@@ -35,10 +35,13 @@ interface Row {
   type: ChatSource['type'];
   source: string;
   summary: string;
+  content: string | null;
 }
 
 export const CHAT_SYSTEM_PROMPT = `You answer questions about today's feed using only the numbered items given by the user.
 Cite the items you use as [n]. Answer only from those items.
+Answer completely: combine information across items and prefer the most relevant items (they come first; the top ones include their full content).
+Questions about the feed as a whole (e.g. "what's worth reading today?") are answered from all the items.
 If the items do not contain the answer, reply exactly: ${NOT_COVERED}`;
 
 @Injectable()
@@ -47,21 +50,22 @@ export class ChatService {
     @Inject(DB_HANDLE) private readonly handle: DbHandle,
     @Inject(EMBEDDER) private readonly embedder: Embedder,
     @Inject(LLM) private readonly llm: Llm,
-    private readonly config: ConfigService<AppConfig, true>,
     private readonly composer: FeedComposer,
     @Inject(ITEM_EMBEDDINGS) private readonly embeddings: ItemEmbeddingStore,
   ) {}
 
   async answer(question: string, topics: string[]): Promise<ChatAnswer> {
-    const rows = await this.retrieve(question, topics);
+    const rows = await this.rankedFeed(question, topics);
     if (rows.length === 0) {
       return { sources: [], tokens: single(NOT_COVERED) };
     }
     const user = [
-      ...rows.map(
-        (r, i) =>
-          `[${i + 1}] ${r.title} — ${r.source} — ${r.url} — ${r.summary}`,
-      ),
+      ...rows.map((r, i) => {
+        const line = `[${i + 1}] ${r.title} — ${r.source} — ${r.type} — ${r.url} — ${r.summary}`;
+        return i < FULL_CONTENT_TOP && r.content
+          ? `${line}\nFull content: ${r.content}`
+          : line;
+      }),
       '',
       `Question: ${question}`,
     ].join('\n');
@@ -78,39 +82,17 @@ export class ChatService {
     };
   }
 
-  private async retrieve(question: string, topics: string[]): Promise<Row[]> {
-    const { sqlite } = this.handle;
-    const feed = await this.composer.compose(topics, localDate());
+  private async rankedFeed(question: string, topics: string[]): Promise<Row[]> {
+    const composed = await this.composer.compose(topics, localDate());
+    const feed = composed.slice(0, FEED_LIMIT);
     if (feed.length === 0) return [];
     // Items whose embedding failed at fetch time are embedded now (no-op when none are missing).
     await this.embeddings.embedMissing(feed);
-    const byId = new Map<number, Row>(feed.map((r) => [r.id, r]));
-
-    const [vector] = await this.embedder.embed([question], 'query');
-    // KNN runs over every embedding, then is restricted to the feed's items,
-    // so k must cover the whole table or other items could crowd them out.
-    const hits = sqlite
-      .prepare(
-        'SELECT c.media_item_id, e.distance FROM (SELECT chunk_id, distance FROM chunk_embeddings WHERE embedding MATCH ? AND k = ?) e JOIN item_chunks c ON c.id = e.chunk_id ORDER BY e.distance',
-      )
-      .all(new Float32Array(vector!), BigInt(MAX_KNN)) as {
-      media_item_id: number | bigint;
-      distance: number;
-    }[];
-
-    const max = this.config.get('CHAT_MAX_DISTANCE', { infer: true });
-    const out: Row[] = [];
-    const seen = new Set<number>();
-    for (const h of hits) {
-      const id = Number(h.media_item_id);
-      const row = byId.get(id);
-      if (row && !seen.has(id) && h.distance <= max) {
-        seen.add(id);
-        out.push(row);
-      }
-      if (out.length === CHAT_TOP_K) break;
-    }
-    return out;
+    return rankFeedItems(
+      { handle: this.handle, embedder: this.embedder },
+      question,
+      feed,
+    );
   }
 }
 
